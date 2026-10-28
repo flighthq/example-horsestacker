@@ -24,7 +24,7 @@ const models = [
 ] as const;
 
 for (const model of models) {
-  const basePath = join(process.cwd(), 'public', 'models', model.name);
+  const basePath = join(process.cwd(), '..', 'assets', 'models', model.name);
   const diagnostics: ImportDiagnostic[] = [];
   const scene = createScene3DFromGltf(
     readFileSync(join(basePath, 'scene.gltf'), 'utf8'),

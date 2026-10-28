@@ -39,7 +39,7 @@ const retryButton = requireElement<HTMLButtonElement>('retry-button');
 const statusCopy = requireElement<HTMLSpanElement>('status-copy');
 
 // Keep these paths indirect so Vite leaves the runtime module-relative URLs untouched
-// without warning. Both directories are served straight out of public/.
+// without warning. Both directories are served from the repository's shared assets/ tree.
 const modelPathFromModule = '../models/';
 const modelRoot = new URL(modelPathFromModule, import.meta.url).href.replace(/\/$/, '');
 const soundPathFromModule = '../sounds/';

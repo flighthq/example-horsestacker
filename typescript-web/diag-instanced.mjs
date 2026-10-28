@@ -1,6 +1,6 @@
 /**
  * Diagnostic for instanced mesh invisibility on ANGLE/llvmpipe.
- * Run from repo root:  node diag-instanced.mjs
+ * Run from typescript-web/:  node diag-instanced.mjs
  * Requires: npm i playwright (already a dev dep), Vite dev server running on :5173
  *
  * IMPORTANT: clear the Vite cache first!

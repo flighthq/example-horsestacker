@@ -28,27 +28,32 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: typescript-web/package-lock.json
 
       - run: npm ci
+        working-directory: typescript-web
 
       # npm run build is tsc --noEmit followed by vite build, so this typechecks too.
       # vite.config.ts sets base: './' and the models are loaded relative to the module
       # URL, so the bundle works unchanged under a /<repo>/ Pages path.
       - name: Build
         run: npm run build
+        working-directory: typescript-web
 
       # The project's own checks, so a broken asset or a regressed pile never publishes.
       - name: Validate assets
         run: npm run validate:assets
+        working-directory: typescript-web
 
       - name: Validate gameplay
         run: npm run validate:game
+        working-directory: typescript-web
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: typescript-web/dist
 
   deploy:
     needs: build

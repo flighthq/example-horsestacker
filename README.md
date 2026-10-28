@@ -1,35 +1,44 @@
 # Horse Stacker
 
-A chaotic low-poly stacking game built in TypeScript with
-[`@flighthq/sdk`](https://github.com/flighthq/flight). Flight's 2D rigid-body
-physics drives the 3D farm props, while Flight's 3D particle renderer handles
-impact dust and the final celebration.
+Horse Stacker is an end-to-end Flight showcase implemented twice:
 
-## Run locally
+- `typescript-web/` is the complete browser game built with TypeScript and Flight's web host.
+- `rust-winit/` is its native Rust and winit counterpart, currently under construction.
+
+Both applications use the canonical models and audio in `assets/`. Their implementations stay
+independent so each one remains an idiomatic, self-contained example of its Flight API.
+
+## TypeScript web application
 
 ```bash
+cd typescript-web
 npm install
 npm run dev
 ```
 
-Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker.
-Click or tap anywhere on the page, or press <kbd>Space</kbd>, <kbd>Enter</kbd>, or
-<kbd>↓</kbd>, to reveal and place the object.
+Move the pointer or use <kbd>←</kbd>/<kbd>→</kbd> to position the yellow marker. Click or tap
+anywhere on the page, or press <kbd>Space</kbd>, <kbd>Enter</kbd>, or <kbd>↓</kbd>, to reveal and
+place the object.
 
-## Checks
+### Checks
 
 ```bash
+cd typescript-web
 npm run build
 npm run validate:assets
 npm run validate:game
 ```
 
-The gameplay validation runs 64-object level, balanced, and teetered placement
-scenarios using the shipped timing and surface-placement rules, then checks the
-weighted prop distribution and both hen variants, all four randomized prop
-types, finite body state, contacts, distinct 2D
-colliders, a measurable supported pile, zero-impulse physics activation, the
-1.55m horse-height conversion, and a real fall beyond the farm-edge collider.
+The gameplay validation runs 64-object level, balanced, and teetered placement scenarios using
+the shipped timing and surface-placement rules. It also checks the weighted prop distribution,
+both hen variants, finite body state, contacts, distinct 2D colliders, supported pile height,
+zero-impulse physics activation, horse-height calibration, and farm-edge falloff.
+
+## Rust winit application
+
+The native application will live in `rust-winit/`. Its source tree follows the same conceptual
+boundaries as the TypeScript application while using idiomatic Rust ownership and winit lifecycle
+handling.
 
 ## Model credits
 
@@ -47,5 +56,5 @@ colliders, a measurable supported pile, zero-impulse physics activation, the
 - “Farm Early Morning (Loop),” “Bodyfall Wood Double Thud,” “Flashlight Turn On 4,”
   “Fanfare Arpeggio Resolution,” and “Ta Da Brass Fanfare 1” sourced from
   [Free Sound Effects](https://free-sound-effects.net/).
-- “HORSE3” whinny compilation sourced from Free Sound Effects and cued as four
-  short reaction clips in the game.
+- “HORSE3” whinny compilation sourced from Free Sound Effects and cued as four short reaction
+  clips in the game.
