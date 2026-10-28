@@ -1,10 +1,10 @@
 //! Dust and celebration emitters, corresponding to `scene/particleEffects.ts`.
 
 use flight_sdk::{
-    EmitterShape, NodeRef, ParticleEmitter3D, ParticleEmitterConfig,
-    ParticleEmitterConfigOptions, ParticleEmitterState, Ref, add_node_child, build_particle_curve,
-    clear_particle_emitter_3d, create_particle_emitter_3d, create_particle_emitter_config,
-    create_particle_emitter_state, emit_particle_burst_3d, step_particle_emitter_3d,
+    EmitterShape, NodeRef, ParticleEmitter3D, ParticleEmitterConfig, ParticleEmitterConfigOptions,
+    ParticleEmitterState, Ref, add_node_child, build_particle_curve, clear_particle_emitter_3d,
+    create_particle_emitter_3d, create_particle_emitter_config, create_particle_emitter_state,
+    emit_particle_burst_3d, step_particle_emitter_3d,
 };
 
 use crate::game::{STACK_X, STACK_Z};

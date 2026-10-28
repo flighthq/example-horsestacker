@@ -6,9 +6,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use flight_sdk::{
     EulerOrder, Material3D, MaterialAlphaMode, Node3DFields, NodeRef, PointLight, Ref,
     Scene3DMaterialOverride, StandardPbrMaterial, add_node_child, as_node3d_ref, create_mesh,
-    create_node3d, create_ring_mesh_geometry, create_standard_pbr_material,
-    invalidate_node_local_transform, publish_node3d, remove_node_children, set_node3d_alpha,
-    set_quaternion_from_euler,
+    create_node3d, create_ring_mesh_geometry, invalidate_node_local_transform, publish_node3d,
+    remove_node_children, set_node3d_alpha, set_quaternion_from_euler,
 };
 
 use crate::game::{
@@ -43,7 +42,7 @@ pub fn create_landing_indicator(
     preview_layer: NodeRef,
     indicator_light: Ref<PointLight>,
 ) -> LandingIndicator {
-    let mut ghost_material = create_standard_pbr_material();
+    let mut ghost_material = StandardPbrMaterial::new();
     ghost_material.alpha_mode = MaterialAlphaMode::Opaque;
     ghost_material.base_color = 0xe2b83fff;
     ghost_material.double_sided = true;
@@ -53,7 +52,7 @@ pub fn create_landing_indicator(
     ghost_material.roughness = 0.38;
     let ghost_material: Ref<dyn Material3D> = Arc::new(RwLock::new(ghost_material));
 
-    let mut halo_material = create_standard_pbr_material();
+    let mut halo_material = StandardPbrMaterial::new();
     halo_material.alpha_mode = MaterialAlphaMode::Blend;
     halo_material.base_color = 0xf5d36aff;
     halo_material.double_sided = true;
@@ -136,8 +135,9 @@ impl LandingIndicator {
     }
 
     pub fn nudge(&mut self, pointer_velocity: f64) {
-        self.angular_velocity = (self.angular_velocity - (pointer_velocity * 0.32).clamp(-4.2, 4.2))
-            .clamp(-INDICATOR_MAX_SPIN, INDICATOR_MAX_SPIN);
+        self.angular_velocity = (self.angular_velocity
+            - (pointer_velocity * 0.32).clamp(-4.2, 4.2))
+        .clamp(-INDICATOR_MAX_SPIN, INDICATOR_MAX_SPIN);
     }
 
     pub fn step_teeter(&mut self, now: f64) {

@@ -59,13 +59,7 @@ pub fn probe_frame_edges(gl: &glow::Context, label: &str, width: i32, height: i3
     }
 }
 
-unsafe fn read_strip(
-    gl: &glow::Context,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Vec<u8> {
+unsafe fn read_strip(gl: &glow::Context, x: i32, y: i32, width: i32, height: i32) -> Vec<u8> {
     let mut pixels = vec![0; width as usize * height as usize * 4];
     unsafe {
         gl.read_pixels(
@@ -119,8 +113,8 @@ fn compare(
 ) -> EdgeReading {
     let mut reading = EdgeReading::default();
     for sample in 0..SAMPLE_COUNT {
-        let index = ((((sample as f64 + 0.5) / SAMPLE_COUNT as f64) * (span - 1) as f64).round())
-            as usize;
+        let index =
+            ((((sample as f64 + 0.5) / SAMPLE_COUNT as f64) * (span - 1) as f64).round()) as usize;
         let (outer, inner) = offsets_at(index);
         let delta = (0..4)
             .map(|channel| pixels[outer + channel].abs_diff(pixels[inner + channel]))

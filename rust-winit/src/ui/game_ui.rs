@@ -171,13 +171,7 @@ pub fn create_game_ui_2d(screen_state: &GlRenderState, pixel_ratio: f32) -> Game
         SANS,
         false,
     );
-    let steady_blurb = label(
-        "No time but no horse may fall off",
-        11.0,
-        INK,
-        SANS,
-        false,
-    );
+    let steady_blurb = label("No time but no horse may fall off", 11.0, INK, SANS, false);
     let menu_pill = create_shape();
     let menu_text = label("MENU", 12.0, INK, SANS, true);
     let next_pill = create_shape();
@@ -331,16 +325,10 @@ pub fn create_game_ui_2d(screen_state: &GlRenderState, pixel_ratio: f32) -> Game
 }
 
 impl GameUi2D {
-    pub fn resize(
-        &mut self,
-        width: f32,
-        height: f32,
-        pixel_ratio: f32,
-    ) -> Result<(), String> {
+    pub fn resize(&mut self, width: f32, height: f32, pixel_ratio: f32) -> Result<(), String> {
         self.width = width.round().max(1.0);
         self.height = height.round().max(1.0);
-        self.renderer
-            .resize(self.width, self.height, pixel_ratio)
+        self.renderer.resize(self.width, self.height, pixel_ratio)
     }
 
     pub fn render(&mut self) -> Result<(), String> {
@@ -366,7 +354,13 @@ impl GameUi2D {
         let on_time_up = model.screen == UiScreen::TimeUp;
         let playing = model.screen == UiScreen::Playing;
 
-        for node in [&self.title_text, &self.time_text, &self.steady_text, &self.time_blurb, &self.steady_blurb] {
+        for node in [
+            &self.title_text,
+            &self.time_text,
+            &self.steady_text,
+            &self.time_blurb,
+            &self.steady_blurb,
+        ] {
             show(node, on_title);
         }
         show(&self.time_pill, on_title);
@@ -675,8 +669,9 @@ impl GameUi2D {
                 badge_y + 8.0 + (1.0 - ease_out_cubic(settle)) * 10.0,
             );
         }
-        let buttons_y =
-            rule_y + if badge_showing { 160.0 } else { 150.0 } + (1.0 - ease_out_back(settle)) * 16.0;
+        let buttons_y = rule_y
+            + if badge_showing { 160.0 } else { 150.0 }
+            + (1.0 - ease_out_back(settle)) * 16.0;
         let again_width = 192.0f32.min((self.width - SCREEN_GUTTER * 2.0 - 108.0).max(120.0));
         let menu_width = 96.0;
         let pair_x = self.width / 2.0 - (again_width + 8.0 + menu_width) / 2.0;
@@ -785,14 +780,13 @@ impl GameUi2D {
         let width = 62.0;
         let x = self.width - 24.0 - width;
         let drop = (1.0 - pop) * 40.0;
-        let y = 18.0
-            + if steady_playing {
+        let y =
+            18.0 + if steady_playing {
                 STEADY_PILL_HEIGHT
             } else {
                 62.0
-            }
-            + 8.0
-            - drop;
+            } + 8.0
+                - drop;
         fill(
             &self.next_pill,
             0x1f2d1dff,
@@ -868,7 +862,13 @@ fn pill(
 ) -> bool {
     let hovered = hovering(pointer, x, y, width, height);
     let pressed = hovered && pointer.down;
-    let grow = if pressed { -1.5 } else if hovered { 2.5 } else { 0.0 };
+    let grow = if pressed {
+        -1.5
+    } else if hovered {
+        2.5
+    } else {
+        0.0
+    };
     let sink = if pressed { 1.5 } else { 0.0 };
     fill(
         shape,
@@ -918,7 +918,13 @@ fn icon_pill(
 ) -> bool {
     let hovered = hovering(pointer, x, y, size, size);
     let pressed = hovered && pointer.down;
-    let grow = if pressed { -1.5 } else if hovered { 2.5 } else { 0.0 };
+    let grow = if pressed {
+        -1.5
+    } else if hovered {
+        2.5
+    } else {
+        0.0
+    };
     let sink = if pressed { 1.5 } else { 0.0 };
     fill(
         shape,
@@ -943,7 +949,10 @@ fn icon_pill(
     hovered
 }
 
-fn mutate_node<T: Node2D + 'static>(node: &Ref<T>, mutate: impl FnOnce(&mut flight_sdk::Node2DFields)) {
+fn mutate_node<T: Node2D + 'static>(
+    node: &Ref<T>,
+    mutate: impl FnOnce(&mut flight_sdk::Node2DFields),
+) {
     mutate(node.write().unwrap().node2d_fields_mut());
     let node: NodeRef = node.clone();
     invalidate_node_appearance(&node);

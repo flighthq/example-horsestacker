@@ -33,12 +33,7 @@ pub fn create_ui_renderer(screen_state: &GlRenderState, pixel_ratio: f32) -> UiR
 }
 
 impl UiRenderer {
-    pub fn resize(
-        &mut self,
-        width: f32,
-        height: f32,
-        next_pixel_ratio: f32,
-    ) -> Result<(), String> {
+    pub fn resize(&mut self, width: f32, height: f32, next_pixel_ratio: f32) -> Result<(), String> {
         self.pixel_ratio = next_pixel_ratio;
         self.device_transform =
             create_matrix(next_pixel_ratio, 0.0, 0.0, next_pixel_ratio, 0.0, 0.0);
@@ -50,7 +45,7 @@ impl UiRenderer {
             &RenderTargetDescriptor {
                 width: (width * next_pixel_ratio).round().max(1.0),
                 height: (height * next_pixel_ratio).round().max(1.0),
-                format: Some(RenderTargetFormat::Rgba8Unorm),
+                format: Some(RenderTargetFormat::Rgba8),
                 color_attachments: None,
                 color_formats: None,
                 sample_count: Some(1.0),

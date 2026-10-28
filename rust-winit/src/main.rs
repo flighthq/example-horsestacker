@@ -21,19 +21,15 @@ use horse_stacker_rust_winit::assets::asset_path;
 use horse_stacker_rust_winit::audio::{AudioManager, create_audio_manager};
 use horse_stacker_rust_winit::game::{Game, GameDeps, GameMode, GamePhase, create_game};
 use horse_stacker_rust_winit::native_storage::NativePreferences;
-use horse_stacker_rust_winit::physics::{
-    StackObjectKind, get_stack_height_meters,
-};
+use horse_stacker_rust_winit::physics::{StackObjectKind, get_stack_height_meters};
 use horse_stacker_rust_winit::scene::{
     CameraRig, LandingIndicator, ParticleEffects, PlayPlanePoint, SceneGraph, SceneRenderer,
     StackObjectVisuals, Windmill, create_camera_rig, create_landing_indicator,
-    create_particle_effects, create_scene_graph, create_scene_renderer, create_stack_object_visuals,
-    create_windmill, extract_farm_prop_templates, load_gltf_scene, mount_farm,
-    sample_farm_terrain, unproject_to_play_plane,
+    create_particle_effects, create_scene_graph, create_scene_renderer,
+    create_stack_object_visuals, create_windmill, extract_farm_prop_templates, load_gltf_scene,
+    mount_farm, sample_farm_terrain, unproject_to_play_plane,
 };
-use horse_stacker_rust_winit::ui::{
-    GameUi2D, UiButtonId, UiModel, UiScreen, create_game_ui_2d,
-};
+use horse_stacker_rust_winit::ui::{GameUi2D, UiButtonId, UiModel, UiScreen, create_game_ui_2d};
 use raw_window_handle::HasWindowHandle;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -114,7 +110,10 @@ struct HorseStackerApp {
 }
 
 impl HorseStackerApp {
-    fn new(template: ConfigTemplateBuilder, display_builder: DisplayBuilder) -> Result<Self, String> {
+    fn new(
+        template: ConfigTemplateBuilder,
+        display_builder: DisplayBuilder,
+    ) -> Result<Self, String> {
         let storage_path = std::env::current_dir()
             .unwrap_or_default()
             .join(".horse-stacker.preferences");
@@ -139,7 +138,12 @@ impl HorseStackerApp {
         let ground = sample_farm_terrain(&farm).map(Into::into);
         let mut game = game;
         game.mark_ready(ground);
-        camera_rig.update(&mut scene_graph.camera, 1.0, game.displayed_height() as f32, game.objects_dropped());
+        camera_rig.update(
+            &mut scene_graph.camera,
+            1.0,
+            game.displayed_height() as f32,
+            game.objects_dropped(),
+        );
         indicator.hide();
 
         Ok(Self {
@@ -168,7 +172,10 @@ impl HorseStackerApp {
             previous_time: 0.0,
             is_viewer_visible: true,
             render_requested: true,
-            input_bounds: InputBounds { width: 1.0, height: 1.0 },
+            input_bounds: InputBounds {
+                width: 1.0,
+                height: 1.0,
+            },
             aim_point: PlayPlanePoint::default(),
             pixel_ratio: 1.0,
             status_copy: "Stable enough".to_owned(),
@@ -177,12 +184,11 @@ impl HorseStackerApp {
         })
     }
 
-    fn now_ms(&self) -> f64 { self.clock.elapsed().as_secs_f64() * 1_000.0 }
+    fn now_ms(&self) -> f64 {
+        self.clock.elapsed().as_secs_f64() * 1_000.0
+    }
 
-    fn with_game_deps<R>(
-        &mut self,
-        call: impl FnOnce(&mut Game, &mut GameDeps<'_>) -> R,
-    ) -> R {
+    fn with_game_deps<R>(&mut self, call: impl FnOnce(&mut Game, &mut GameDeps<'_>) -> R) -> R {
         let Self {
             game,
             audio,
@@ -210,7 +216,9 @@ impl HorseStackerApp {
     }
 
     fn start_game(&mut self, mode: GameMode, started_from: Option<f64>) {
-        if !self.game.is_ready() || self.game.phase() == GamePhase::Loading { return; }
+        if !self.game.is_ready() || self.game.phase() == GamePhase::Loading {
+            return;
+        }
         self.credits_open = false;
         let now = self.now_ms();
         self.previous_time = now;
@@ -232,11 +240,19 @@ impl HorseStackerApp {
         };
         let ndc_x = client_x / self.input_bounds.width * 2.0 - 1.0;
         let ndc_y = 1.0 - client_y / self.input_bounds.height * 2.0;
-        if !unproject_to_play_plane(&mut self.aim_point, &self.scene_graph.camera, ndc_x, ndc_y, aspect) {
+        if !unproject_to_play_plane(
+            &mut self.aim_point,
+            &self.scene_graph.camera,
+            ndc_x,
+            ndc_y,
+            aspect,
+        ) {
             return;
         }
         let point = self.aim_point;
-        self.with_game_deps(|game, deps| game.aim_at(deps, f64::from(point.x), f64::from(point.y), now));
+        self.with_game_deps(|game, deps| {
+            game.aim_at(deps, f64::from(point.x), f64::from(point.y), now)
+        });
     }
 
     fn track_pointer(&mut self, position: PhysicalPosition<f64>) {
@@ -253,15 +269,23 @@ impl HorseStackerApp {
                     && self.pointer_y <= button.y + button.height
             })
         });
-        let Some(button) = button else { return false; };
+        let Some(button) = button else {
+            return false;
+        };
         let screen = self.get_ui_screen();
         match button.id {
             UiButtonId::Credits => self.credits_open = !self.credits_open,
             UiButtonId::Fullscreen => self.toggle_fullscreen(),
             UiButtonId::Mute => self.audio.set_muted(!self.audio.muted()),
-            UiButtonId::Time if screen == UiScreen::Title => self.start_game(GameMode::Time, Some(event_at)),
-            UiButtonId::Steady if screen == UiScreen::Title => self.start_game(GameMode::Steady, Some(event_at)),
-            UiButtonId::Again if screen == UiScreen::Result => self.start_game(self.game.mode(), Some(event_at)),
+            UiButtonId::Time if screen == UiScreen::Title => {
+                self.start_game(GameMode::Time, Some(event_at))
+            }
+            UiButtonId::Steady if screen == UiScreen::Title => {
+                self.start_game(GameMode::Steady, Some(event_at))
+            }
+            UiButtonId::Again if screen == UiScreen::Result => {
+                self.start_game(self.game.mode(), Some(event_at))
+            }
             UiButtonId::Menu => self.return_to_menu(),
             _ => return false,
         }
@@ -270,7 +294,9 @@ impl HorseStackerApp {
     }
 
     fn toggle_fullscreen(&mut self) {
-        let Some(surface) = &self.surface else { return; };
+        let Some(surface) = &self.surface else {
+            return;
+        };
         let fullscreen = if surface.window.fullscreen().is_some() {
             None
         } else {
@@ -283,7 +309,9 @@ impl HorseStackerApp {
     fn resize_canvas(&mut self, size: PhysicalSize<u32>) -> Result<(), String> {
         let width = size.width.max(1);
         let height = size.height.max(1);
-        self.pixel_ratio = self.surface.as_ref()
+        self.pixel_ratio = self
+            .surface
+            .as_ref()
             .map(|surface| surface.window.scale_factor().min(2.0) as f32)
             .unwrap_or(1.0);
         self.input_bounds.width = width as f32 / self.pixel_ratio;
@@ -292,7 +320,11 @@ impl HorseStackerApp {
             let resized = renderer.resize(width, height)?;
             if resized {
                 if let Some(ui) = self.game_ui.as_mut() {
-                    ui.resize(self.input_bounds.width, self.input_bounds.height, self.pixel_ratio)?;
+                    ui.resize(
+                        self.input_bounds.width,
+                        self.input_bounds.height,
+                        self.pixel_ratio,
+                    )?;
                 }
                 set_camera_aspect(&mut self.scene_graph, width, height);
                 self.render_requested = true;
@@ -302,7 +334,9 @@ impl HorseStackerApp {
     }
 
     fn get_ui_screen(&self) -> UiScreen {
-        if let Some(screen) = self.forced_screen { return screen; }
+        if let Some(screen) = self.forced_screen {
+            return screen;
+        }
         match self.game.phase() {
             GamePhase::Loading => UiScreen::Loading,
             GamePhase::Playing => UiScreen::Playing,
@@ -316,18 +350,30 @@ impl HorseStackerApp {
         let now = self.now_ms();
         let delta_time = ((now - self.previous_time) / 1_000.0).clamp(0.0, 0.05);
         self.previous_time = now;
-        if self.game.phase() == GamePhase::Loading || !self.is_viewer_visible { return; }
+        if self.game.phase() == GamePhase::Loading || !self.is_viewer_visible {
+            return;
+        }
 
         let game_is_moving = self.game.is_running();
         self.with_game_deps(|game, deps| game.update(deps, now, delta_time));
-        if game_is_moving { self.render_requested = true; }
-        if self.windmill.as_mut().is_some_and(|windmill| windmill.update(delta_time as f32)) {
+        if game_is_moving {
+            self.render_requested = true;
+        }
+        if self
+            .windmill
+            .as_mut()
+            .is_some_and(|windmill| windmill.update(delta_time as f32))
+        {
             self.render_requested = true;
         }
         self.audio.update(now, self.game.is_running());
 
         let screen = self.get_ui_screen();
-        let wants_backdrop = if matches!(screen, UiScreen::Title | UiScreen::Result) { 1.0 } else { 0.0 };
+        let wants_backdrop = if matches!(screen, UiScreen::Title | UiScreen::Result) {
+            1.0
+        } else {
+            0.0
+        };
         let focused = self.backdrop_focus
             + (wants_backdrop - self.backdrop_focus) * (1.0 - (-delta_time * 5.5).exp());
         if (focused - self.backdrop_focus).abs() > 0.0005 {
@@ -339,7 +385,9 @@ impl HorseStackerApp {
         }
 
         let particles_are_moving = self.particles.step(delta_time as f32);
-        if particles_are_moving { self.render_requested = true; }
+        if particles_are_moving {
+            self.render_requested = true;
+        }
         if self.camera_rig.update(
             &mut self.scene_graph.camera,
             delta_time as f32,
@@ -350,12 +398,16 @@ impl HorseStackerApp {
         }
         let camera_is_moving = self.camera_rig.is_moving();
         if self.render_requested || game_is_moving || particles_are_moving || camera_is_moving {
-            if let Some(surface) = &self.surface { surface.window.request_redraw(); }
+            if let Some(surface) = &self.surface {
+                surface.window.request_redraw();
+            }
         }
     }
 
     fn render_frame(&mut self) -> Result<(), String> {
-        let renderer = self.renderer.as_mut()
+        let renderer = self
+            .renderer
+            .as_mut()
             .ok_or_else(|| "render requested before the Flight renderer was ready".to_owned())?;
         renderer.draw_scene(&self.scene_graph);
 
@@ -363,7 +415,9 @@ impl HorseStackerApp {
         let final_meters = get_stack_height_meters(self.game.final_height());
         let shown_meters = final_meters * ease_out_cubic(count_progress);
         let model = UiModel {
-            best_text: self.game.record_before_round()
+            best_text: self
+                .game
+                .record_before_round()
                 .filter(|_| !self.game.beat_the_record())
                 .map(|meters| format!("BEST {}", format_meters(meters)))
                 .unwrap_or_default(),
@@ -375,18 +429,28 @@ impl HorseStackerApp {
             pointer_down: self.pointer_down,
             pointer_x: self.pointer_x,
             pointer_y: self.pointer_y,
-            height_text: format_meters(if count_progress >= 1.0 { final_meters } else { shown_meters }),
+            height_text: format_meters(if count_progress >= 1.0 {
+                final_meters
+            } else {
+                shown_meters
+            }),
             live_height_text: format_meters(get_stack_height_meters(self.game.displayed_height())),
             next_piece_glyph: piece_glyph(self.game.next_kind()).to_owned(),
             mode: self.game.mode(),
             muted: self.audio.muted(),
             screen: self.get_ui_screen(),
             seconds_left: self.game.seconds_left(),
-            time_up_progress: if self.forced_screen == Some(UiScreen::TimeUp) { 1.0 } else { self.game.time_up_progress() },
+            time_up_progress: if self.forced_screen == Some(UiScreen::TimeUp) {
+                1.0
+            } else {
+                self.game.time_up_progress()
+            },
             credits_text: None,
         };
         if let Some(ui) = self.game_ui.as_mut() {
-            if ui.update(&model) { self.render_requested = true; }
+            if ui.update(&model) {
+                self.render_requested = true;
+            }
             ui.render()?;
         }
         self.edge_probe_requested = false;
@@ -395,7 +459,9 @@ impl HorseStackerApp {
     }
 
     fn update_window_title(&self) {
-        let Some(surface) = &self.surface else { return; };
+        let Some(surface) = &self.surface else {
+            return;
+        };
         let title = match self.game.phase() {
             GamePhase::Loading => format!("{WINDOW_TITLE} — loading"),
             GamePhase::Ready => format!("{WINDOW_TITLE} — Time Challenge · Steady Hands"),
@@ -426,12 +492,19 @@ impl HorseStackerApp {
 
     fn redraw(&mut self) -> Result<(), String> {
         self.render_frame()?;
-        let surface = self.surface.as_ref()
+        let surface = self
+            .surface
+            .as_ref()
             .ok_or_else(|| "redraw requested without a window surface".to_owned())?;
-        let context = self.context.as_ref()
+        let context = self
+            .context
+            .as_ref()
             .ok_or_else(|| "redraw requested without a GL context".to_owned())?;
         surface.window.pre_present_notify();
-        surface.gl_surface.swap_buffers(context).map_err(|error| format!("swap buffers: {error}"))
+        surface
+            .gl_surface
+            .swap_buffers(context)
+            .map_err(|error| format!("swap buffers: {error}"))
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, logical_key: Key<&str>, event_at: f64) {
@@ -446,7 +519,9 @@ impl HorseStackerApp {
         if self.game.phase() == GamePhase::Ready {
             match logical_key {
                 Key::Named(NamedKey::Enter) => self.start_game(GameMode::Time, Some(event_at)),
-                Key::Character(value) if value.eq_ignore_ascii_case("s") => self.start_game(GameMode::Steady, Some(event_at)),
+                Key::Character(value) if value.eq_ignore_ascii_case("s") => {
+                    self.start_game(GameMode::Steady, Some(event_at))
+                }
                 _ => {}
             }
             return;
@@ -455,12 +530,18 @@ impl HorseStackerApp {
             self.start_game(self.game.mode(), Some(event_at));
             return;
         }
-        if self.game.phase() != GamePhase::Playing { return; }
+        if self.game.phase() != GamePhase::Playing {
+            return;
+        }
         match logical_key {
-            Key::Named(NamedKey::ArrowLeft) => self.with_game_deps(|game, deps| game.nudge_aim(deps, -KEYBOARD_NUDGE, 0.0, event_at)),
-            Key::Named(NamedKey::ArrowRight) => self.with_game_deps(|game, deps| game.nudge_aim(deps, KEYBOARD_NUDGE, 0.0, event_at)),
-            Key::Named(NamedKey::ArrowUp) => self.with_game_deps(|game, deps| game.nudge_aim(deps, 0.0, KEYBOARD_NUDGE, event_at)),
-            Key::Named(NamedKey::ArrowDown) => self.with_game_deps(|game, deps| game.nudge_aim(deps, 0.0, -KEYBOARD_NUDGE, event_at)),
+            Key::Named(NamedKey::ArrowLeft) => self
+                .with_game_deps(|game, deps| game.nudge_aim(deps, -KEYBOARD_NUDGE, 0.0, event_at)),
+            Key::Named(NamedKey::ArrowRight) => self
+                .with_game_deps(|game, deps| game.nudge_aim(deps, KEYBOARD_NUDGE, 0.0, event_at)),
+            Key::Named(NamedKey::ArrowUp) => self
+                .with_game_deps(|game, deps| game.nudge_aim(deps, 0.0, KEYBOARD_NUDGE, event_at)),
+            Key::Named(NamedKey::ArrowDown) => self
+                .with_game_deps(|game, deps| game.nudge_aim(deps, 0.0, -KEYBOARD_NUDGE, event_at)),
             Key::Named(NamedKey::Enter) | Key::Character(" ") => {
                 self.with_game_deps(|game, deps| game.place(deps, event_at, Some(event_at)));
             }
@@ -477,51 +558,92 @@ impl ApplicationHandler for HorseStackerApp {
         self.previous_time = self.now_ms();
         let (window, gl_config) = match &self.display {
             GlDisplayCreationState::Builder(display_builder) => {
-                let built = display_builder.as_ref().clone().build(event_loop, self.template.clone(), pick_gl_config);
+                let built = display_builder.as_ref().clone().build(
+                    event_loop,
+                    self.template.clone(),
+                    pick_gl_config,
+                );
                 let (window, gl_config) = match built {
                     Ok((Some(window), config)) => (window, config),
-                    Ok((None, _)) => { self.fail(event_loop, "the GL display did not create a window"); return; }
-                    Err(error) => { self.fail(event_loop, format!("create GL display: {error}")); return; }
+                    Ok((None, _)) => {
+                        self.fail(event_loop, "the GL display did not create a window");
+                        return;
+                    }
+                    Err(error) => {
+                        self.fail(event_loop, format!("create GL display: {error}"));
+                        return;
+                    }
                 };
                 self.display = GlDisplayCreationState::Initialized;
                 self.context = match create_gl_context(&window, &gl_config) {
                     Ok(context) => Some(context.treat_as_possibly_current()),
-                    Err(error) => { self.fail(event_loop, error); return; }
+                    Err(error) => {
+                        self.fail(event_loop, error);
+                        return;
+                    }
                 };
                 (window, gl_config)
             }
             GlDisplayCreationState::Initialized => {
                 let gl_config = self.context.as_ref().expect("context retained").config();
-                let window = match glutin_winit::finalize_window(event_loop, window_attributes(), &gl_config) {
+                let window = match glutin_winit::finalize_window(
+                    event_loop,
+                    window_attributes(),
+                    &gl_config,
+                ) {
                     Ok(window) => window,
-                    Err(error) => { self.fail(event_loop, format!("recreate window: {error}")); return; }
+                    Err(error) => {
+                        self.fail(event_loop, format!("recreate window: {error}"));
+                        return;
+                    }
                 };
                 (window, gl_config)
             }
         };
         let attributes = match window.build_surface_attributes(Default::default()) {
             Ok(attributes) => attributes,
-            Err(error) => { self.fail(event_loop, format!("create surface attributes: {error}")); return; }
+            Err(error) => {
+                self.fail(event_loop, format!("create surface attributes: {error}"));
+                return;
+            }
         };
-        let gl_surface = match unsafe { gl_config.display().create_window_surface(&gl_config, &attributes) } {
+        let gl_surface = match unsafe {
+            gl_config
+                .display()
+                .create_window_surface(&gl_config, &attributes)
+        } {
             Ok(surface) => surface,
-            Err(error) => { self.fail(event_loop, format!("create window surface: {error}")); return; }
+            Err(error) => {
+                self.fail(event_loop, format!("create window surface: {error}"));
+                return;
+            }
         };
-        let context = self.context.as_ref().expect("context created before surface");
+        let context = self
+            .context
+            .as_ref()
+            .expect("context created before surface");
         if let Err(error) = context.make_current(&gl_surface) {
             self.fail(event_loop, format!("make GL context current: {error}"));
             return;
         }
-        let _ = gl_surface.set_swap_interval(context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()));
+        let _ =
+            gl_surface.set_swap_interval(context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()));
         let size = window.inner_size();
         self.surface = Some(AppSurface { gl_surface, window });
         if self.renderer.is_none() {
-            match create_native_scene_renderer(&gl_config.display(), size.width.max(1), size.height.max(1)) {
+            match create_native_scene_renderer(
+                &gl_config.display(),
+                size.width.max(1),
+                size.height.max(1),
+            ) {
                 Ok(renderer) => {
                     self.game_ui = Some(create_game_ui_2d(&renderer.render_state, 1.0));
                     self.renderer = Some(renderer);
                 }
-                Err(error) => { self.fail(event_loop, error); return; }
+                Err(error) => {
+                    self.fail(event_loop, error);
+                    return;
+                }
             }
         }
         if let Err(error) = self.resize_canvas(size) {
@@ -529,7 +651,9 @@ impl ApplicationHandler for HorseStackerApp {
             return;
         }
         self.render_requested = true;
-        if let Some(surface) = &self.surface { surface.window.request_redraw(); }
+        if let Some(surface) = &self.surface {
+            surface.window.request_redraw();
+        }
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
@@ -537,11 +661,21 @@ impl ApplicationHandler for HorseStackerApp {
         self.game.reset_step_accumulator();
         self.surface = None;
         if let Some(context) = self.context.take() {
-            self.context = Some(context.make_not_current().expect("suspend current GL context").treat_as_possibly_current());
+            self.context = Some(
+                context
+                    .make_not_current()
+                    .expect("suspend current GL context")
+                    .treat_as_possibly_current(),
+            );
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::CursorMoved { position, .. } => {
@@ -556,7 +690,11 @@ impl ApplicationHandler for HorseStackerApp {
                 self.pointer_y = -1.0;
                 self.pointer_down = false;
             }
-            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
                 self.pointer_down = state == ElementState::Pressed;
                 self.render_requested = true;
                 if state == ElementState::Pressed {
@@ -568,7 +706,12 @@ impl ApplicationHandler for HorseStackerApp {
                 }
             }
             WindowEvent::KeyboardInput {
-                event: KeyEvent { logical_key, state: ElementState::Pressed, .. },
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state: ElementState::Pressed,
+                        ..
+                    },
                 ..
             } => self.handle_key(event_loop, logical_key.as_ref(), self.now_ms()),
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
@@ -579,16 +722,22 @@ impl ApplicationHandler for HorseStackerApp {
                         NonZeroU32::new(size.height).unwrap(),
                     );
                 }
-                if let Err(error) = self.resize_canvas(size) { self.fail(event_loop, error); }
+                if let Err(error) = self.resize_canvas(size) {
+                    self.fail(event_loop, error);
+                }
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(surface) = &self.surface {
                     let size = surface.window.inner_size();
-                    if let Err(error) = self.resize_canvas(size) { self.fail(event_loop, error); }
+                    if let Err(error) = self.resize_canvas(size) {
+                        self.fail(event_loop, error);
+                    }
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let Err(error) = self.redraw() { self.fail(event_loop, error); }
+                if let Err(error) = self.redraw() {
+                    self.fail(event_loop, error);
+                }
             }
             _ => {}
         }
@@ -646,8 +795,12 @@ fn mode_label(mode: GameMode) -> &'static str {
     }
 }
 
-fn ease_out_cubic(value: f64) -> f64 { 1.0 - (1.0 - value).powi(3) }
-fn format_meters(meters: f64) -> String { format!("{meters:.2} m") }
+fn ease_out_cubic(value: f64) -> f64 {
+    1.0 - (1.0 - value).powi(3)
+}
+fn format_meters(meters: f64) -> String {
+    format!("{meters:.2} m")
+}
 
 fn create_gl_context(window: &Window, gl_config: &Config) -> Result<NotCurrentContext, String> {
     let raw_window_handle = window.window_handle().ok().map(|handle| handle.as_raw());
@@ -659,14 +812,21 @@ fn create_gl_context(window: &Window, gl_config: &Config) -> Result<NotCurrentCo
         .build(raw_window_handle);
     let display = gl_config.display();
     unsafe {
-        display.create_context(gl_config, &context_attributes)
+        display
+            .create_context(gl_config, &context_attributes)
             .or_else(|_| display.create_context(gl_config, &gles_attributes))
             .map_err(|error| format!("create a GL 3.3 or GLES 3.0 context: {error}"))
     }
 }
 
 fn pick_gl_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
-    configs.reduce(|best, candidate| {
-        if candidate.num_samples() > best.num_samples() { candidate } else { best }
-    }).expect("the platform must expose at least one GL configuration")
+    configs
+        .reduce(|best, candidate| {
+            if candidate.num_samples() > best.num_samples() {
+                candidate
+            } else {
+                best
+            }
+        })
+        .expect("the platform must expose at least one GL configuration")
 }

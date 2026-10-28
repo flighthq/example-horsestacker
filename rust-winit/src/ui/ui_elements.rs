@@ -16,13 +16,7 @@ pub const INK: u32 = 0xfbf7ecff;
 pub const SERIF: &str = "Georgia, Times New Roman, serif";
 pub const SANS: &str = "system-ui, Segoe UI, Helvetica, Arial, sans-serif";
 
-pub fn label(
-    text: &str,
-    size: f32,
-    color: u32,
-    font: &str,
-    bold: bool,
-) -> Ref<TextLabel> {
+pub fn label(text: &str, size: f32, color: u32, font: &str, bold: bool) -> Ref<TextLabel> {
     let node = create_text_label(None);
     set_text_label_string(&node, text);
     set_text_label_format(
@@ -139,7 +133,9 @@ pub fn draw_speaker(shape: &Ref<Shape>, colour: u32, alpha: f64, muted: bool) {
     );
     append_shape_polygon(
         shape,
-        &[-6.0, -2.5, -3.0, -2.5, 1.0, -6.5, 1.0, 6.5, -3.0, 2.5, -6.0, 2.5],
+        &[
+            -6.0, -2.5, -3.0, -2.5, 1.0, -6.5, 1.0, 6.5, -3.0, 2.5, -6.0, 2.5,
+        ],
     );
     if muted {
         append_shape_move_to(shape, 4.5, -2.0);

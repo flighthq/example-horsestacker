@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::game::{
-    AMBIENCE_FADE_AFTER_MS, AMBIENCE_FADE_MS, FINAL_WHINNY_CHANCE,
+    AMBIENCE_FADE_AFTER_MS, AMBIENCE_FADE_MS, FINAL_WHINNY_CHANCE, GameMode,
     HORSE_PLACEMENT_WHINNY_CHANCE, HORSE_WHINNY_CUES, HORSE_WHINNY_INTERVAL_JITTER_MS,
-    HORSE_WHINNY_MIN_INTERVAL_MS, RESULT_TICK_INTERVAL_MS, GameMode,
+    HORSE_WHINNY_MIN_INTERVAL_MS, RESULT_TICK_INTERVAL_MS,
 };
 use crate::native_storage::NativePreferences;
 use crate::reduced_motion::prefers_reduced_motion;
@@ -216,9 +216,7 @@ impl AudioManager {
     }
 
     pub fn maybe_play_horse_whinny(&mut self, now: f64) {
-        if now < self.next_horse_whinny_at
-            || self.next_random() >= HORSE_PLACEMENT_WHINNY_CHANCE
-        {
+        if now < self.next_horse_whinny_at || self.next_random() >= HORSE_PLACEMENT_WHINNY_CHANCE {
             return;
         }
         self.play_whinny();
@@ -288,12 +286,7 @@ impl AudioManager {
         }
     }
 
-    fn play(
-        &mut self,
-        name: SoundName,
-        loops: f64,
-        start_at: f64,
-    ) -> Option<AudioChannel> {
+    fn play(&mut self, name: SoundName, loops: f64, start_at: f64) -> Option<AudioChannel> {
         let resource = self.resources.get(&name)?;
         let channel = self.backend.play(
             resource,
@@ -328,8 +321,8 @@ impl AudioManager {
         let Some(cue) = HORSE_WHINNY_CUES.get(index.min(HORSE_WHINNY_CUES.len() - 1)) else {
             return;
         };
-        self.whinny_channel = self.play(SoundName::Whinny, 0.0, cue.start);
-        self.whinny_stops_at = Some(self.last_now + cue.duration * 1_000.0);
+        self.whinny_channel = self.play(SoundName::Whinny, 0.0, cue.start_seconds);
+        self.whinny_stops_at = Some(self.last_now + cue.duration_seconds * 1_000.0);
     }
 
     fn raise_ambience(&mut self) {

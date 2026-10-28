@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use flight_sdk::node::contract::NodeRevisionState;
 use flight_sdk::{
-    Mesh, Scene3D, Scene3DPickOptions, create_ray3d, create_scene3d_hit, create_vector3,
+    Mesh, NodeRef, Scene3D, Scene3DPickOptions, create_ray3d, create_scene3d_hit, create_vector3,
     pick_scene3d_with_ray3d, set_ray3d,
 };
 
@@ -57,25 +57,19 @@ pub fn sample_farm_terrain(farm: &Scene3D) -> Option<TerrainProfile> {
         predicate: Some(Arc::new(is_ground_mesh)),
     };
     let mut revisions = NodeRevisionState::default();
+    let farm_root: NodeRef = farm.root.clone();
     for (sample, height) in heights.iter_mut().enumerate() {
         let physics_x = min_x + step * sample as f64;
         origin.z = STACK_Z as f32 - physics_x as f32;
         set_ray3d(&mut ray, &origin, &down);
-        if !pick_scene3d_with_ray3d(
-            &mut hit,
-            &farm.root,
-            &ray,
-            Some(&options),
-            &mut revisions,
-        ) {
+        if !pick_scene3d_with_ray3d(&mut hit, &farm_root, &ray, Some(&options), &mut revisions) {
             continue;
         }
-        let normal_length =
-            (hit.normal_x * hit.normal_x + hit.normal_y * hit.normal_y + hit.normal_z * hit.normal_z)
-                .sqrt();
-        if normal_length < 1e-12
-            || hit.normal_y.abs() / normal_length < MIN_WALKABLE_NORMAL_Y
-        {
+        let normal_length = (hit.normal_x * hit.normal_x
+            + hit.normal_y * hit.normal_y
+            + hit.normal_z * hit.normal_z)
+            .sqrt();
+        if normal_length < 1e-12 || hit.normal_y.abs() / normal_length < MIN_WALKABLE_NORMAL_Y {
             continue;
         }
         *height = f64::from(hit.point_y) - STACK_BASE_Y;

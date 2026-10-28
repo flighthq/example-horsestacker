@@ -1,7 +1,7 @@
 //! The farm's turning windmill sails, corresponding to `scene/windmill.ts`.
 
 use flight_sdk::{
-    EulerOrder, Mesh, Node3DFields, NodeRef, Ref, Scene3D, downcast_node_ref, find_node_by_name,
+    EulerOrder, Mesh, Node3D, NodeRef, Ref, Scene3D, downcast_node_ref, find_node_by_name,
     invalidate_node_local_transform, refresh_mesh_geometry_bounds, set_quaternion_from_euler,
 };
 
@@ -69,20 +69,14 @@ impl Windmill {
         if prefers_reduced_motion() {
             return false;
         }
-        self.angle = (self.angle + WINDMILL_RADIANS_PER_SECOND as f32 * delta_time)
-            % std::f32::consts::TAU;
+        self.angle =
+            (self.angle + WINDMILL_RADIANS_PER_SECOND as f32 * delta_time) % std::f32::consts::TAU;
         let sin = self.angle.sin();
         let cos = self.angle.cos();
         {
             let mut sails = self.sails.write().unwrap();
             let fields = sails.node3d_fields_mut();
-            set_quaternion_from_euler(
-                &mut fields.rotation,
-                self.angle,
-                0.0,
-                0.0,
-                EulerOrder::XYZ,
-            );
+            set_quaternion_from_euler(&mut fields.rotation, self.angle, 0.0, 0.0, EulerOrder::XYZ);
             fields.position.y = self.hub_y - (self.hub_y * cos - self.hub_z * sin);
             fields.position.z = self.hub_z - (self.hub_y * sin + self.hub_z * cos);
         }
