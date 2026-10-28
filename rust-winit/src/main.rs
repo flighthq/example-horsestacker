@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use flight_sdk::{FlightError, Projection, get_flight_error_kind_string};
+use glow::HasContext;
 use glutin::config::{Config, ConfigTemplateBuilder, GetGlConfig};
 use glutin::context::{
     ContextApi, ContextAttributesBuilder, NotCurrentContext, PossiblyCurrentContext, Version,
@@ -43,12 +44,12 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 const WINDOW_TITLE: &str = "Horse Stacker";
 const KEYBOARD_NUDGE: f64 = 0.05;
+const NATIVE_CLEAR_COLOR: [f32; 4] = [0.075, 0.16, 0.22, 1.0];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     install_flight_panic_hook();
     let event_loop = EventLoop::new()?;
     let template = ConfigTemplateBuilder::new()
-        .with_alpha_size(8)
         .with_depth_size(24)
         .with_stencil_size(8);
     let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes()));
@@ -63,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn window_attributes() -> WindowAttributes {
     Window::default_attributes()
         .with_title(WINDOW_TITLE)
+        .with_transparent(false)
         .with_inner_size(LogicalSize::new(1280.0, 720.0))
         .with_min_inner_size(LogicalSize::new(640.0, 360.0))
 }
@@ -111,6 +113,7 @@ struct HorseStackerApp {
     status_copy: String,
     edge_probe_requested: bool,
     forced_screen: Option<UiScreen>,
+    frames_presented: u64,
 }
 
 impl HorseStackerApp {
@@ -149,6 +152,7 @@ impl HorseStackerApp {
             game.objects_dropped(),
         );
         indicator.hide();
+        eprintln!("[horse-stacker] startup: assets loaded and game state ready");
 
         Ok(Self {
             template,
@@ -185,6 +189,7 @@ impl HorseStackerApp {
             status_copy: "Stable enough".to_owned(),
             edge_probe_requested: false,
             forced_screen: None,
+            frames_presented: 0,
         })
     }
 
@@ -321,18 +326,22 @@ impl HorseStackerApp {
         self.input_bounds.width = width as f32 / self.pixel_ratio;
         self.input_bounds.height = height as f32 / self.pixel_ratio;
         if let Some(renderer) = self.renderer.as_mut() {
-            let resized = renderer.resize(width, height)?;
-            if resized {
-                if let Some(ui) = self.game_ui.as_mut() {
-                    ui.resize(
-                        self.input_bounds.width,
-                        self.input_bounds.height,
-                        self.pixel_ratio,
-                    )?;
-                }
-                set_camera_aspect(&mut self.scene_graph, width, height);
-                self.render_requested = true;
+            let scene_resized = renderer.resize(width, height)?;
+            if let Some(ui) = self.game_ui.as_mut() {
+                // The UI owns a separate target and must be allocated even when the scene target was
+                // created at the final window size and therefore reports no resize on first launch.
+                ui.resize(
+                    self.input_bounds.width,
+                    self.input_bounds.height,
+                    self.pixel_ratio,
+                )?;
             }
+            set_camera_aspect(&mut self.scene_graph, width, height);
+            self.render_requested = true;
+            eprintln!(
+                "[horse-stacker] resize: physical={width}x{height} logical={:.0}x{:.0} scale={:.2} scene_resized={scene_resized} ui_target=ready",
+                self.input_bounds.width, self.input_bounds.height, self.pixel_ratio,
+            );
         }
         Ok(())
     }
@@ -409,11 +418,49 @@ impl HorseStackerApp {
     }
 
     fn render_frame(&mut self) -> Result<(), String> {
-        let renderer = self
-            .renderer
-            .as_mut()
-            .ok_or_else(|| "render requested before the Flight renderer was ready".to_owned())?;
-        renderer.draw_scene(&self.scene_graph);
+        let trace_frame = self.frames_presented < 3;
+        let size = self
+            .surface
+            .as_ref()
+            .map(|surface| surface.window.inner_size())
+            .ok_or_else(|| "render requested before the window surface was ready".to_owned())?;
+        let screen = self.get_ui_screen();
+        let phase = self.game.phase();
+        let now = self.now_ms();
+        if trace_frame {
+            eprintln!(
+                "[horse-stacker] frame {}: begin phase={:?} screen={:?} size={}x{}",
+                self.frames_presented + 1,
+                phase,
+                screen,
+                size.width,
+                size.height,
+            );
+        }
+        let gl = {
+            let renderer = self.renderer.as_mut().ok_or_else(|| {
+                "render requested before the Flight renderer was ready".to_owned()
+            })?;
+            prepare_native_frame(
+                &renderer.render_state.gl,
+                size.width.max(1),
+                size.height.max(1),
+            );
+            renderer.draw_scene(&self.scene_graph);
+            if trace_frame {
+                let runtime = renderer.render_state.gl_runtime.borrow();
+                let stats = &runtime.stats;
+                eprintln!(
+                    "[horse-stacker] frame {}: 3D pass complete draws={} triangles={} programs={} framebuffers={}",
+                    self.frames_presented + 1,
+                    stats.draw_calls,
+                    stats.triangles,
+                    stats.program_switches,
+                    stats.framebuffer_binds,
+                );
+            }
+            Rc::clone(&renderer.render_state.gl)
+        };
 
         let count_progress = self.game.count_progress();
         let final_meters = get_stack_height_meters(self.game.final_height());
@@ -429,7 +476,7 @@ impl HorseStackerApp {
             credits_open: self.credits_open,
             is_record: self.game.beat_the_record(),
             hands_shown: self.game.result_hands_shown(),
-            now: self.now_ms(),
+            now,
             pointer_down: self.pointer_down,
             pointer_x: self.pointer_x,
             pointer_y: self.pointer_y,
@@ -442,7 +489,7 @@ impl HorseStackerApp {
             next_piece_glyph: piece_glyph(self.game.next_kind()).to_owned(),
             mode: self.game.mode(),
             muted: self.audio.muted(),
-            screen: self.get_ui_screen(),
+            screen,
             seconds_left: self.game.seconds_left(),
             time_up_progress: if self.forced_screen == Some(UiScreen::TimeUp) {
                 1.0
@@ -452,10 +499,31 @@ impl HorseStackerApp {
             credits_text: None,
         };
         if let Some(ui) = self.game_ui.as_mut() {
-            if ui.update(&model) {
+            let ui_changed = ui.update(&model);
+            if ui_changed {
                 self.render_requested = true;
             }
             ui.render()?;
+            if trace_frame {
+                eprintln!(
+                    "[horse-stacker] frame {}: UI pass complete changed={ui_changed} buttons={}",
+                    self.frames_presented + 1,
+                    ui.buttons.len(),
+                );
+            }
+        } else if trace_frame {
+            eprintln!(
+                "[horse-stacker] frame {}: UI pass missing",
+                self.frames_presented + 1,
+            );
+        }
+        if trace_frame {
+            log_default_framebuffer(
+                &gl,
+                size.width.max(1),
+                size.height.max(1),
+                self.frames_presented + 1,
+            );
         }
         self.edge_probe_requested = false;
         self.render_requested = false;
@@ -485,7 +553,15 @@ impl HorseStackerApp {
         surface
             .gl_surface
             .swap_buffers(context)
-            .map_err(|error| format!("swap buffers: {error}"))
+            .map_err(|error| format!("swap buffers: {error}"))?;
+        self.frames_presented += 1;
+        if self.frames_presented <= 3 {
+            eprintln!(
+                "[horse-stacker] frame {}: buffer swap complete",
+                self.frames_presented
+            );
+        }
+        Ok(())
     }
 
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, logical_key: Key<&str>, event_at: f64) {
@@ -535,6 +611,7 @@ impl HorseStackerApp {
 
 impl ApplicationHandler for HorseStackerApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        eprintln!("[horse-stacker] window: resumed; creating GL display");
         self.is_viewer_visible = true;
         self.previous_time = self.now_ms();
         let (window, gl_config) = match &self.display {
@@ -563,6 +640,13 @@ impl ApplicationHandler for HorseStackerApp {
                         return;
                     }
                 };
+                eprintln!(
+                    "[horse-stacker] GL config: samples={} alpha={} depth={} stencil={}",
+                    gl_config.num_samples(),
+                    gl_config.alpha_size(),
+                    gl_config.depth_size(),
+                    gl_config.stencil_size(),
+                );
                 (window, gl_config)
             }
             GlDisplayCreationState::Initialized => {
@@ -607,6 +691,10 @@ impl ApplicationHandler for HorseStackerApp {
             self.fail(event_loop, format!("make GL context current: {error}"));
             return;
         }
+        eprintln!(
+            "[horse-stacker] GL context: {:?}; surface current",
+            context.context_api()
+        );
         let _ =
             gl_surface.set_swap_interval(context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()));
         let size = window.inner_size();
@@ -621,6 +709,7 @@ impl ApplicationHandler for HorseStackerApp {
                 Ok(renderer) => {
                     self.game_ui = Some(create_game_ui_2d(&renderer.render_state, 1.0));
                     self.renderer = Some(renderer);
+                    eprintln!("[horse-stacker] renderer: Flight 3D and 2D states created");
                 }
                 Err(error) => {
                     self.fail(event_loop, error);
@@ -697,6 +786,10 @@ impl ApplicationHandler for HorseStackerApp {
                 ..
             } => self.handle_key(event_loop, logical_key.as_ref(), self.now_ms()),
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                eprintln!(
+                    "[horse-stacker] window event: resized to {}x{}",
+                    size.width, size.height
+                );
                 if let (Some(surface), Some(context)) = (&self.surface, &self.context) {
                     surface.gl_surface.resize(
                         context,
@@ -757,7 +850,61 @@ fn create_native_scene_renderer<D: GlDisplay>(
     let gl = Rc::new(unsafe {
         create_native_gl_context(|symbol| display.get_proc_address(symbol), desktop_gl)
     });
+    // SAFETY: the context is current and these are read-only GL identity queries.
+    unsafe {
+        eprintln!(
+            "[horse-stacker] GL identity: vendor={} renderer={} version={} shading={}",
+            gl.get_parameter_string(glow::VENDOR),
+            gl.get_parameter_string(glow::RENDERER),
+            gl.get_parameter_string(glow::VERSION),
+            gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION),
+        );
+    }
     create_scene_renderer(gl, width, height)
+}
+
+fn prepare_native_frame(gl: &glow::Context, width: u32, height: u32) {
+    // Flight's `destination: None` presentation path relies on the host viewport and default
+    // framebuffer. Establish both explicitly and make the compositor-facing frame opaque.
+    // SAFETY: called on the current context's event-loop thread before Flight begins its passes.
+    unsafe {
+        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        gl.viewport(0, 0, width as i32, height as i32);
+        gl.disable(glow::SCISSOR_TEST);
+        gl.color_mask(true, true, true, true);
+        gl.clear_color(
+            NATIVE_CLEAR_COLOR[0],
+            NATIVE_CLEAR_COLOR[1],
+            NATIVE_CLEAR_COLOR[2],
+            NATIVE_CLEAR_COLOR[3],
+        );
+        gl.clear(glow::COLOR_BUFFER_BIT);
+    }
+}
+
+fn log_default_framebuffer(gl: &glow::Context, width: u32, height: u32, frame: u64) {
+    let mut viewport = [0_i32; 4];
+    let mut pixel = [0_u8; 4];
+    // SAFETY: diagnostics run on the current context before swap; the output slices have the exact
+    // sizes required by the queried state and one RGBA8 pixel.
+    let (framebuffer, error) = unsafe {
+        gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+        let framebuffer = gl.get_parameter_i32(glow::FRAMEBUFFER_BINDING);
+        gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+        gl.read_pixels(
+            (width / 2) as i32,
+            (height / 2) as i32,
+            1,
+            1,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelPackData::Slice(Some(&mut pixel)),
+        );
+        (framebuffer, gl.get_error())
+    };
+    eprintln!(
+        "[horse-stacker] frame {frame}: default framebuffer={framebuffer} viewport={viewport:?} center_rgba={pixel:?} gl_error=0x{error:04x}"
+    );
 }
 
 fn format_panic_payload(payload: &(dyn Any + Send)) -> String {

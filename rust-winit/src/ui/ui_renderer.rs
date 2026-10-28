@@ -16,6 +16,7 @@ pub struct UiRenderer {
     target: Option<GlTextureRenderTarget>,
     device_transform: Matrix,
     pixel_ratio: f32,
+    trace_first_render: bool,
 }
 
 pub fn create_ui_renderer(screen_state: &GlRenderState, pixel_ratio: f32) -> UiRenderer {
@@ -29,6 +30,7 @@ pub fn create_ui_renderer(screen_state: &GlRenderState, pixel_ratio: f32) -> UiR
         target: None,
         device_transform: create_matrix(pixel_ratio, 0.0, 0.0, pixel_ratio, 0.0, 0.0),
         pixel_ratio,
+        trace_first_render: true,
     }
 }
 
@@ -54,14 +56,34 @@ impl UiRenderer {
             },
             None,
         )?;
+        if let Some(target) = &self.target {
+            eprintln!(
+                "[horse-stacker] UI target: {}x{} format={:?} color_space={:?}",
+                target.axes.width, target.axes.height, target.axes.format, target.axes.color_space,
+            );
+        } else {
+            eprintln!("[horse-stacker] UI target: allocation returned no target");
+        }
         Ok(())
     }
 
     pub fn render(&mut self, root: &NodeRef) -> Result<(), String> {
+        let trace = self.trace_first_render;
+        self.trace_first_render = false;
         let Some(target) = &self.target else {
+            if trace {
+                eprintln!("[horse-stacker] UI render: skipped because no target exists");
+            }
             return Ok(());
         };
-        if !prepare_scene_2d_render(&mut self.state, &mut self.proxies, root) {
+        let prepared = prepare_scene_2d_render(&mut self.state, &mut self.proxies, root);
+        if trace {
+            eprintln!(
+                "[horse-stacker] UI render: prepare={prepared} target={}x{}",
+                target.axes.width, target.axes.height,
+            );
+        }
+        if !prepared {
             return Ok(());
         }
         let pass = begin_gl_render_pass(
@@ -81,7 +103,16 @@ impl UiRenderer {
             Some(&self.device_transform),
         );
         end_gl_render_pass(&self.state, &pass)?;
-        present_gl_render_target(&mut self.state, target, None)
+        present_gl_render_target(&mut self.state, target, None)?;
+        if trace {
+            let runtime = self.state.gl_runtime.borrow();
+            let stats = &runtime.stats;
+            eprintln!(
+                "[horse-stacker] UI render: presented draws={} triangles={} programs={} framebuffers={}",
+                stats.draw_calls, stats.triangles, stats.program_switches, stats.framebuffer_binds,
+            );
+        }
+        Ok(())
     }
 }
 

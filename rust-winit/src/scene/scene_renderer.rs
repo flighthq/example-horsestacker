@@ -41,6 +41,15 @@ pub fn create_scene_renderer(
         None,
     )?
     .ok_or_else(|| "Flight could not allocate the scene render target".to_owned())?;
+    eprintln!(
+        "[horse-stacker] scene target: {}x{} format={:?} samples={} depth={:?} color_space={:?}",
+        target.axes.width,
+        target.axes.height,
+        target.axes.format,
+        target.axes.sample_count,
+        target.axes.depth,
+        target.axes.color_space,
+    );
     Ok(SceneRenderer {
         render_state,
         target,
