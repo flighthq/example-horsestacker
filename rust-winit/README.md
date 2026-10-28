@@ -7,7 +7,8 @@ normally supplies.
 The source port now covers the complete TypeScript application mechanically:
 
 - opens a native window and owns its lifecycle through `winit`;
-- creates a `glow` context, Flight scene render state, and linear multisampled target;
+- creates a `glow` context, normalizes Flight's WebGL-authored shaders for the selected native GL
+  dialect, and creates the Flight scene render state and linear multisampled target;
 - imports and mounts the shared farm glTF, with the same scale and placement as the web game;
 - builds the same sky dome, camera, light rig, tight-fit shadow camera, and stack-following orbit
   controller, then renders and presents them through Flight GL;

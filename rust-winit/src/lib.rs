@@ -6,6 +6,8 @@ pub mod audio;
 pub mod data;
 #[cfg(feature = "flight-physics")]
 pub mod game;
+#[cfg(feature = "native")]
+pub mod native_gl;
 pub mod native_storage;
 pub mod physics;
 pub mod reduced_motion;

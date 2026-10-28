@@ -3,12 +3,14 @@
 //! The round rules remain in `game/game.rs`, just as `typescript-web/src/main.ts` leaves them in
 //! `game/game.ts`. This file assembles the same object graph in dependency order.
 
+use std::any::Any;
 use std::io;
 use std::num::NonZeroU32;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::time::Instant;
 
-use flight_sdk::Projection;
+use flight_sdk::{FlightError, Projection, get_flight_error_kind_string};
 use glutin::config::{Config, ConfigTemplateBuilder, GetGlConfig};
 use glutin::context::{
     ContextApi, ContextAttributesBuilder, NotCurrentContext, PossiblyCurrentContext, Version,
@@ -20,6 +22,7 @@ use glutin_winit::{DisplayBuilder, GlWindow};
 use horse_stacker_rust_winit::assets::asset_path;
 use horse_stacker_rust_winit::audio::{AudioManager, create_audio_manager};
 use horse_stacker_rust_winit::game::{Game, GameDeps, GameMode, GamePhase, create_game};
+use horse_stacker_rust_winit::native_gl::create_native_gl_context;
 use horse_stacker_rust_winit::native_storage::NativePreferences;
 use horse_stacker_rust_winit::physics::{StackObjectKind, get_stack_height_meters};
 use horse_stacker_rust_winit::scene::{
@@ -38,10 +41,11 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
-const WINDOW_TITLE: &str = "Horse Stacker — Flight Rust + winit";
+const WINDOW_TITLE: &str = "Horse Stacker";
 const KEYBOARD_NUDGE: f64 = 0.05;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    install_flight_panic_hook();
     let event_loop = EventLoop::new()?;
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
@@ -458,29 +462,6 @@ impl HorseStackerApp {
         Ok(())
     }
 
-    fn update_window_title(&self) {
-        let Some(surface) = &self.surface else {
-            return;
-        };
-        let title = match self.game.phase() {
-            GamePhase::Loading => format!("{WINDOW_TITLE} — loading"),
-            GamePhase::Ready => format!("{WINDOW_TITLE} — Time Challenge · Steady Hands"),
-            GamePhase::Playing => format!(
-                "{WINDOW_TITLE} — {} · {} · {} placed · next {}",
-                mode_label(self.game.mode()),
-                format_meters(get_stack_height_meters(self.game.displayed_height())),
-                self.game.objects_dropped(),
-                piece_glyph(self.game.next_kind()),
-            ),
-            GamePhase::Settling => format!("{WINDOW_TITLE} — settling the pile…"),
-            GamePhase::Finished => format!(
-                "{WINDOW_TITLE} — {} · play again or menu",
-                format_meters(get_stack_height_meters(self.game.final_height())),
-            ),
-        };
-        surface.window.set_title(&title);
-    }
-
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl Into<String>) {
         let error = error.into();
         self.audio.stop_all();
@@ -633,6 +614,7 @@ impl ApplicationHandler for HorseStackerApp {
         if self.renderer.is_none() {
             match create_native_scene_renderer(
                 &gl_config.display(),
+                matches!(context.context_api(), ContextApi::OpenGl(_)),
                 size.width.max(1),
                 size.height.max(1),
             ) {
@@ -735,8 +717,12 @@ impl ApplicationHandler for HorseStackerApp {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let Err(error) = self.redraw() {
-                    self.fail(event_loop, error);
+                match catch_unwind(AssertUnwindSafe(|| self.redraw())) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => self.fail(event_loop, error),
+                    Err(payload) => {
+                        self.fail(event_loop, format_panic_payload(payload.as_ref()));
+                    }
                 }
             }
             _ => {}
@@ -745,7 +731,6 @@ impl ApplicationHandler for HorseStackerApp {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         self.enter_frame();
-        self.update_window_title();
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -764,13 +749,51 @@ struct AppSurface {
 
 fn create_native_scene_renderer<D: GlDisplay>(
     display: &D,
+    desktop_gl: bool,
     width: u32,
     height: u32,
 ) -> Result<SceneRenderer, String> {
+    // SAFETY: resumed() made this display's context current immediately before renderer creation.
     let gl = Rc::new(unsafe {
-        glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol))
+        create_native_gl_context(|symbol| display.get_proc_address(symbol), desktop_gl)
     });
     create_scene_renderer(gl, width, height)
+}
+
+fn format_panic_payload(payload: &(dyn Any + Send)) -> String {
+    if let Some(error) = payload.downcast_ref::<FlightError>() {
+        return format!(
+            "Flight {}: {}",
+            get_flight_error_kind_string(error.kind),
+            error.message
+        );
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        return (*message).to_owned();
+    }
+    "native renderer panicked with an unknown payload".to_owned()
+}
+
+fn install_flight_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(error) = info.payload().downcast_ref::<FlightError>() {
+            let location = info
+                .location()
+                .map(|location| format!("{}:{}", location.file(), location.line()))
+                .unwrap_or_else(|| "unknown location".to_owned());
+            eprintln!(
+                "Flight {} at {location}: {}",
+                get_flight_error_kind_string(error.kind),
+                error.message
+            );
+        } else {
+            default_hook(info);
+        }
+    }));
 }
 
 fn set_camera_aspect(scene_graph: &mut SceneGraph, width: u32, height: u32) {
@@ -785,13 +808,6 @@ fn piece_glyph(kind: StackObjectKind) -> &'static str {
         StackObjectKind::Cow => "🐄",
         StackObjectKind::Hay => "🌾",
         StackObjectKind::Horse => "🐴",
-    }
-}
-
-fn mode_label(mode: GameMode) -> &'static str {
-    match mode {
-        GameMode::Time => "Time Challenge",
-        GameMode::Steady => "Steady Hands",
     }
 }
 
