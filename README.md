@@ -36,9 +36,16 @@ zero-impulse physics activation, horse-height calibration, and farm-edge falloff
 
 ## Rust winit application
 
-The native application will live in `rust-winit/`. Its source tree follows the same conceptual
-boundaries as the TypeScript application while using idiomatic Rust ownership and winit lifecycle
-handling.
+The native application has begun in `rust-winit/`. Its first milestone opens a native GL window,
+creates a Flight render state, and clears the screen through a Flight render pass. The shared-asset
+resolver and the first pure game rules, stack profiles, and collider geometry are also in place.
+
+```bash
+cargo run --manifest-path rust-winit/Cargo.toml
+```
+
+Flight is pinned to an exact source revision while its Rust/TypeScript parity work is in progress.
+See [`rust-winit/README.md`](rust-winit/README.md) for the current port status and checks.
 
 ## Model credits
 
