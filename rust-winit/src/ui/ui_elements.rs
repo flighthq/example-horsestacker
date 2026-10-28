@@ -137,14 +137,49 @@ pub fn draw_speaker(shape: &Ref<Shape>, colour: u32, alpha: f64, muted: bool) {
             -6.0, -2.5, -3.0, -2.5, 1.0, -6.5, 1.0, 6.5, -3.0, 2.5, -6.0, 2.5,
         ],
     );
+    // Keep the closed speaker outline separate from the open sound/cross marks. The native
+    // stroke tessellator handles each form, but deliberately rejects a mixed closed/open path.
+    append_shape_line_style(
+        shape,
+        Some(1.5),
+        colour,
+        Some(alpha),
+        Some(false),
+        None,
+        Some(CapsStyle::Round),
+        Some(JointStyle::Round),
+        None,
+    );
     if muted {
         append_shape_move_to(shape, 4.5, -2.0);
         append_shape_line_to(shape, 8.0, 2.0);
+        append_shape_line_style(
+            shape,
+            Some(1.5),
+            colour,
+            Some(alpha),
+            Some(false),
+            None,
+            Some(CapsStyle::Round),
+            Some(JointStyle::Round),
+            None,
+        );
         append_shape_move_to(shape, 8.0, -2.0);
         append_shape_line_to(shape, 4.5, 2.0);
     } else {
         append_shape_move_to(shape, 4.0, -3.0);
         append_shape_quadratic_curve_to(shape, 6.4, 0.0, 4.0, 3.0);
+        append_shape_line_style(
+            shape,
+            Some(1.5),
+            colour,
+            Some(alpha),
+            Some(false),
+            None,
+            Some(CapsStyle::Round),
+            Some(JointStyle::Round),
+            None,
+        );
         append_shape_move_to(shape, 7.0, -5.5);
         append_shape_quadratic_curve_to(shape, 10.2, 0.0, 7.0, 5.5);
     }
@@ -154,24 +189,77 @@ pub fn draw_speaker(shape: &Ref<Shape>, colour: u32, alpha: f64, muted: bool) {
 
 pub fn draw_fullscreen(shape: &Ref<Shape>, colour: u32, alpha: f64) {
     clear_shape_commands(shape);
-    append_shape_line_style(
-        shape,
-        Some(1.5),
-        colour,
-        Some(alpha),
-        Some(true),
-        None,
-        Some(CapsStyle::Square),
-        Some(JointStyle::Miter),
-        None,
-    );
     let outer = 6.0;
     let inner = 2.0;
     for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+        append_shape_line_style(
+            shape,
+            Some(1.5),
+            colour,
+            Some(alpha),
+            Some(true),
+            None,
+            Some(CapsStyle::Square),
+            Some(JointStyle::Miter),
+            None,
+        );
         append_shape_move_to(shape, sx * inner, sy * outer);
         append_shape_line_to(shape, sx * outer, sy * outer);
         append_shape_line_to(shape, sx * outer, sy * inner);
     }
     let node: NodeRef = shape.clone();
     invalidate_node_render(&node);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{INK, draw_fullscreen, draw_speaker};
+    use flight_sdk::{
+        ShapeTessellationStatus, create_shape, get_shape_stroke_regions, tessellate_stroke_path,
+    };
+
+    fn assert_strokes_make_triangles(shape: &flight_sdk::Ref<flight_sdk::Shape>) {
+        let commands = &shape.read().unwrap().data.commands;
+        let regions = get_shape_stroke_regions(commands).unwrap();
+        let triangle_indices = regions
+            .iter()
+            .enumerate()
+            .map(|(index, region)| {
+                let path = region.path.read().unwrap();
+                tessellate_stroke_path(&path, &region.style, None)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "stroke region {index} did not tessellate: {:?}",
+                            path.commands
+                        )
+                    })
+                    .indices
+                    .len()
+            })
+            .sum::<usize>();
+        assert!(triangle_indices >= 3);
+    }
+
+    #[test]
+    fn control_icons_remain_mesh_renderable_in_every_state() {
+        let speaker = create_shape();
+        for muted in [false, true] {
+            draw_speaker(&speaker, INK, 1.0, muted);
+            let explanation = flight_sdk::shape::contract::explain_shape_tessellation(
+                &speaker.read().unwrap().data.commands,
+                Some(true),
+            );
+            assert_eq!(explanation.status, ShapeTessellationStatus::Tessellates);
+            assert_strokes_make_triangles(&speaker);
+        }
+
+        let fullscreen = create_shape();
+        draw_fullscreen(&fullscreen, INK, 1.0);
+        let explanation = flight_sdk::shape::contract::explain_shape_tessellation(
+            &fullscreen.read().unwrap().data.commands,
+            Some(true),
+        );
+        assert_eq!(explanation.status, ShapeTessellationStatus::Tessellates);
+        assert_strokes_make_triangles(&fullscreen);
+    }
 }

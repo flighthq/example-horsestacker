@@ -12,6 +12,7 @@ flight-physics = ["dep:flight-sdk"]
 native = [
   "flight-physics",
   "flight-sdk/gl",
+  "dep:ab_glyph",
   "dep:glow",
   "dep:glutin",
   "dep:glutin-winit",
@@ -26,6 +27,7 @@ required-features = ["native"]
 
 [dependencies]
 # Keep the showcase on one auditable Flight snapshot while the Rust/TS parity work lands.
+ab_glyph = { version = "=0.2.32", optional = true }
 flight-sdk = { git = "https://github.com/flighthq/flight.git", rev = "9e8325c93cc9bd0aeef2924ad047a8eb93020e32", default-features = false, optional = true }
 glow = { version = "=0.18.0", optional = true }
 glutin = { version = "=0.32.3", optional = true }

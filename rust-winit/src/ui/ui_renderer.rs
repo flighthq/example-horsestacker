@@ -10,6 +10,8 @@ use flight_sdk::{
     gl_scene2d_render_preset, prepare_scene_2d_render, present_gl_render_target, render_gl_scene2d,
 };
 
+use crate::native_2d::{Native2DHost, create_native_2d_host};
+
 pub struct UiRenderer {
     pub state: GlRenderState,
     proxies: RenderProxies2D<GlRenderState>,
@@ -17,13 +19,17 @@ pub struct UiRenderer {
     device_transform: Matrix,
     pixel_ratio: f32,
     trace_first_render: bool,
+    _native_host: Native2DHost,
 }
 
 pub fn create_ui_renderer(screen_state: &GlRenderState, pixel_ratio: f32) -> UiRenderer {
-    let state = create_gl_render_state(
-        Rc::clone(&screen_state.context_state),
-        Some(&gl_scene2d_render_preset()),
-    );
+    let native_host = create_native_2d_host();
+    let mut options = gl_scene2d_render_preset();
+    options.canvas_host = Some(native_host.canvas.clone());
+    options.image_host = Some(native_host.image.clone());
+    options.image_resolver = Some(native_host.image_resolver.clone());
+    let mut state = create_gl_render_state(Rc::clone(&screen_state.context_state), Some(&options));
+    state.render.pixel_ratio = pixel_ratio;
     UiRenderer {
         state,
         proxies: RenderProxies2D::default(),
@@ -31,12 +37,14 @@ pub fn create_ui_renderer(screen_state: &GlRenderState, pixel_ratio: f32) -> UiR
         device_transform: create_matrix(pixel_ratio, 0.0, 0.0, pixel_ratio, 0.0, 0.0),
         pixel_ratio,
         trace_first_render: true,
+        _native_host: native_host,
     }
 }
 
 impl UiRenderer {
     pub fn resize(&mut self, width: f32, height: f32, next_pixel_ratio: f32) -> Result<(), String> {
         self.pixel_ratio = next_pixel_ratio;
+        self.state.render.pixel_ratio = next_pixel_ratio;
         self.device_transform =
             create_matrix(next_pixel_ratio, 0.0, 0.0, next_pixel_ratio, 0.0, 0.0);
         if let Some(mut target) = self.target.take() {

@@ -7,6 +7,8 @@ pub mod data;
 #[cfg(feature = "flight-physics")]
 pub mod game;
 #[cfg(feature = "native")]
+pub mod native_2d;
+#[cfg(feature = "native")]
 pub mod native_gl;
 pub mod native_storage;
 pub mod physics;

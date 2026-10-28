@@ -7,12 +7,17 @@ counterpart. Browser host operations are translated to the native substitution n
 are not silently omitted.
 
 Every row below passed that source inventory on 2026-10-27. The complete native target now passes
-`cargo check --all-targets`, `cargo build --all-targets`, and its 25 library tests. The lightweight
+`cargo check --all-targets`, `cargo build --all-targets`, and its 29 library tests. The lightweight
 no-feature lane passes 10 tests and the headless `flight-physics` lane passes 20 tests.
+
+Source inventory and host parity are tracked separately. The native GL and Canvas 2D/image hosts are
+implemented and exercise the same Flight scene and UI APIs. The remaining known host gap is audible
+output: `NativeAudioBackend` currently preserves the TS channel/mixer behavior as a command sink but
+does not decode the shared MP3 assets or open an operating-system audio device.
 
 | TypeScript source | Rust counterpart | Translation status | Native substitution |
 | --- | --- | --- | --- |
-| `audio/audioManager.ts` | `audio/audio_manager.rs` | translated and compiled | Native audio channel/resource host and preference store |
+| `audio/audioManager.ts` | `audio/audio_manager.rs` | translated and compiled; device output pending | Native channel/resource abstraction and preference store |
 | `data/farmPropGeometry.ts` | `data/farm_prop_geometry.rs` | translated | None |
 | `game/game.ts` | `game/game.rs` | translated and compiled | Native preference store for records; winit input clock |
 | `game/gameConfig.ts` | `game/game_config.rs` | translated | None |
@@ -39,10 +44,12 @@ no-feature lane passes 10 tests and the headless `flight-physics` lane passes 20
 | `scene/windmill.ts` | `scene/windmill.rs` | translated and compiled | Native reduced-motion preference |
 | `ui/gameUi.ts` | `ui/game_ui.rs` | translated and compiled | Flight 2D nodes over the native GL surface |
 | `ui/uiElements.ts` | `ui/ui_elements.rs` | translated and compiled | Flight text metrics rather than browser canvas measurement |
-| `ui/uiRenderer.ts` | `ui/ui_renderer.rs` | translated and compiled | Native Flight GL state without web image/canvas hosts |
+| `ui/uiRenderer.ts` | `ui/ui_renderer.rs` | translated and compiled | Native software Canvas 2D/image host feeding Flight GL |
 
 Host-only `styles.css` becomes native window/Flight-2D presentation and therefore has no literal
 Rust file. `vite-env.d.ts` only augments the TypeScript build and has no runtime counterpart.
 `native_gl.rs` is native host glue: it normalizes GLSL versions, ES precision declarations, and
 versionless WebGL 1 keywords at the `glShaderSource` boundary so Flight's shared shaders work with
-either desktop OpenGL 3.3 or glutin's OpenGL ES 3 fallback.
+either desktop OpenGL 3.3 or glutin's OpenGL ES 3 fallback. `native_2d.rs` supplies the Canvas 2D,
+system-font rasterization, image-resource, and pixel-upload seam used by Flight's native
+`TextLabel` and `RichText` renderers.

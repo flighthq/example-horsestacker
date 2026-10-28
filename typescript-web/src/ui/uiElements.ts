@@ -162,10 +162,14 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
   // Body and cone as one closed outline: back of the box, along the top of the cone, down
   // its face, and back. Wound clockwise in the 2D frame, where +y is down.
   appendShapePolygon(shape, [-6, -2.5, -3, -2.5, 1, -6.5, 1, 6.5, -3, 2.5, -6, 2.5]);
+  // Keep the closed speaker outline separate from the open sound/cross marks. The native
+  // stroke tessellator handles each form, but deliberately rejects a mixed closed/open path.
+  appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round', 'round');
   if (muted) {
     // A small cross where the sound would be.
     appendShapeMoveTo(shape, 4.5, -2);
     appendShapeLineTo(shape, 8, 2);
+    appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round', 'round');
     appendShapeMoveTo(shape, 8, -2);
     appendShapeLineTo(shape, 4.5, 2);
   } else {
@@ -175,6 +179,7 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
     // bars never quite did.
     appendShapeMoveTo(shape, 4, -3);
     appendShapeQuadraticCurveTo(shape, 6.4, 0, 4, 3);
+    appendShapeLineStyle(shape, 1.5, colour, alpha, false, undefined, 'round', 'round');
     appendShapeMoveTo(shape, 7, -5.5);
     appendShapeQuadraticCurveTo(shape, 10.2, 0, 7, 5.5);
   }
@@ -203,10 +208,10 @@ export function drawFullscreen(shape: Shape, colour: number, alpha: number): voi
   //
   // Square caps rather than round for the same reason: a round cap on a 3.5-long arm is a
   // fifth of it, and eight of them unantialiased read as blobs on the ends.
-  appendShapeLineStyle(shape, 1.5, colour, alpha, true, undefined, 'square', 'miter');
   const outer = 6;
   const inner = 2;
   for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+    appendShapeLineStyle(shape, 1.5, colour, alpha, true, undefined, 'square', 'miter');
     appendShapeMoveTo(shape, sx * inner, sy * outer);
     appendShapeLineTo(shape, sx * outer, sy * outer);
     appendShapeLineTo(shape, sx * outer, sy * inner);

@@ -22,7 +22,9 @@ The source port now covers the complete TypeScript application mechanically:
   stack assistance, contacts, pasture bounds, and supported/settled-height rules as the web game;
 - translates the landing indicator, terrain sampler, windmill, dust and celebration particles,
   play-plane unprojection, edge probe, reduced-motion preference, audio orchestration, and the full
-  five-screen Flight 2D UI; and
+  five-screen Flight 2D UI;
+- supplies Flight's native Canvas 2D and image capabilities so the UI's `TextLabel` and `RichText`
+  declarations rasterize through system sans/serif fonts and upload into the shared GL context; and
 - maps the browser shell onto winit cursor/keyboard events, borderless fullscreen, visibility and
   context lifecycle, a native preference file, and the native GL surface.
 
