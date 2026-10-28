@@ -446,7 +446,7 @@ impl HorseStackerApp {
                 size.width.max(1),
                 size.height.max(1),
             );
-            renderer.draw_scene(&self.scene_graph);
+            renderer.draw_scene(&self.scene_graph, self.backdrop_focus as f32);
             let scene_error = if trace_frame {
                 // SAFETY: the renderer's context is current on this event-loop thread.
                 unsafe { renderer.render_state.gl.get_error() }

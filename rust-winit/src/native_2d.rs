@@ -218,10 +218,7 @@ impl NativeCanvas2D {
     }
 
     fn logical_text_width(&self, text: &str, spec: FontSpec) -> f32 {
-        let Some(font) = self.fonts.select(spec) else {
-            return text.chars().count() as f32 * spec.size * 0.56;
-        };
-        text_width(font, text, spec.size)
+        text_width(self.fonts.select(spec), text, spec.size)
     }
 
     fn mutate_pixels(&self, draw: impl FnOnce(&mut CanvasState, u32, u32, &NativeFonts)) {
@@ -281,10 +278,7 @@ impl Canvas2DContext for NativeCanvas2D {
     fn fill_text(&self, text: &str, x: f32, y: f32) {
         self.mutate_pixels(|state, width, height, fonts| {
             let spec = state.font;
-            let Some(font) = fonts.select(spec) else {
-                return;
-            };
-            draw_text(font, state, width, height, text, x, y);
+            draw_text(fonts.select(spec), state, width, height, text, x, y);
         });
     }
 
@@ -479,7 +473,7 @@ pub fn create_native_2d_host() -> Native2DHost {
 }
 
 fn draw_text(
-    font: &FontArc,
+    font: Option<&FontArc>,
     state: &mut CanvasState,
     width: u32,
     height: u32,
@@ -489,8 +483,7 @@ fn draw_text(
 ) {
     let [a, b, c, d, e, f] = state.transform;
     let scale_factor = ((a.abs() + d.abs()) * 0.5).max(0.01);
-    let scale = PxScale::from(state.font.size * scale_factor);
-    let scaled = font.as_scaled(scale);
+    let scale = font.map(|font| css_pixel_scale(font, state.font.size * scale_factor));
     let measured = text_width(font, text, state.font.size) * scale_factor;
     let aligned_x = match state.text_align {
         TextAlign::Center => x - measured / (2.0 * scale_factor),
@@ -503,6 +496,26 @@ fn draw_text(
     let global_alpha = state.global_alpha;
     let clip = state.clip;
     for character in text.chars() {
+        if is_game_emoji(character) {
+            draw_game_emoji(
+                state,
+                width,
+                height,
+                character,
+                cursor_x,
+                baseline_y,
+                state.font.size * scale_factor,
+            );
+            cursor_x += state.font.size * scale_factor;
+            previous = None;
+            continue;
+        }
+        let (Some(font), Some(scale)) = (font, scale) else {
+            cursor_x += state.font.size * 0.56 * scale_factor;
+            previous = None;
+            continue;
+        };
+        let scaled = font.as_scaled(scale);
         let id = scaled.glyph_id(character);
         if let Some(previous) = previous {
             cursor_x += scaled.kern(previous, id);
@@ -523,11 +536,39 @@ fn draw_text(
     }
 }
 
-fn text_width(font: &FontArc, text: &str, size: f32) -> f32 {
-    let scaled = font.as_scaled(PxScale::from(size.max(0.01)));
+fn css_pixel_scale(font: &FontArc, pixels_per_em: f32) -> PxScale {
+    let height = font.height_unscaled();
+    let units_per_em = font.units_per_em().unwrap_or(height);
+    PxScale::from(css_pixels_to_ab_glyph_height(
+        pixels_per_em,
+        height,
+        units_per_em,
+    ))
+}
+
+fn css_pixels_to_ab_glyph_height(
+    pixels_per_em: f32,
+    unscaled_height: f32,
+    units_per_em: f32,
+) -> f32 {
+    pixels_per_em.max(0.01) * unscaled_height / units_per_em
+}
+
+fn text_width(font: Option<&FontArc>, text: &str, size: f32) -> f32 {
+    let scaled = font.map(|font| font.as_scaled(css_pixel_scale(font, size)));
     let mut width = 0.0;
     let mut previous = None;
     for character in text.chars() {
+        if is_game_emoji(character) {
+            width += size;
+            previous = None;
+            continue;
+        }
+        let Some(scaled) = scaled.as_ref() else {
+            width += size * 0.56;
+            previous = None;
+            continue;
+        };
         let id = scaled.glyph_id(character);
         if let Some(previous) = previous {
             width += scaled.kern(previous, id);
@@ -536,6 +577,120 @@ fn text_width(font: &FontArc, text: &str, size: f32) -> f32 {
         previous = Some(id);
     }
     width
+}
+
+fn is_game_emoji(character: char) -> bool {
+    matches!(character, '🐔' | '🐄' | '🌾' | '🐴')
+}
+
+fn draw_game_emoji(
+    state: &mut CanvasState,
+    width: u32,
+    height: u32,
+    character: char,
+    cursor_x: f32,
+    baseline_y: f32,
+    em: f32,
+) {
+    let glyph_size = em * 0.94;
+    let left = cursor_x + (em - glyph_size) * 0.5;
+    let top = baseline_y - em * 0.86;
+    let x0 = left.floor() as i32;
+    let y0 = top.floor() as i32;
+    let x1 = (left + glyph_size).ceil() as i32;
+    let y1 = (top + glyph_size).ceil() as i32;
+    for pixel_y in y0..y1 {
+        for pixel_x in x0..x1 {
+            let u = (pixel_x as f32 + 0.5 - left) / glyph_size;
+            let v = (pixel_y as f32 + 0.5 - top) / glyph_size;
+            let Some(color) = game_emoji_pixel(character, u, v) else {
+                continue;
+            };
+            if let Some(index) = pixel_index(pixel_x, pixel_y, state.clip, width, height) {
+                blend_pixel(&mut state.pixels, index, color, state.global_alpha);
+            }
+        }
+    }
+}
+
+fn game_emoji_pixel(character: char, u: f32, v: f32) -> Option<[u8; 4]> {
+    fn ellipse(u: f32, v: f32, cx: f32, cy: f32, rx: f32, ry: f32) -> bool {
+        ((u - cx) / rx).powi(2) + ((v - cy) / ry).powi(2) <= 1.0
+    }
+
+    match character {
+        '🐴' => {
+            let mut color = None;
+            if ellipse(u, v, 0.28, 0.2, 0.14, 0.22) || ellipse(u, v, 0.72, 0.2, 0.14, 0.22) {
+                color = Some([151, 82, 42, 255]);
+            }
+            if ellipse(u, v, 0.5, 0.5, 0.34, 0.45) {
+                color = Some([222, 139, 76, 255]);
+            }
+            if ellipse(u, v, 0.5, 0.72, 0.25, 0.18) {
+                color = Some([247, 181, 112, 255]);
+            }
+            if ellipse(u, v, 0.38, 0.43, 0.045, 0.055)
+                || ellipse(u, v, 0.62, 0.43, 0.045, 0.055)
+                || ellipse(u, v, 0.43, 0.73, 0.032, 0.025)
+                || ellipse(u, v, 0.57, 0.73, 0.032, 0.025)
+            {
+                color = Some([49, 31, 25, 255]);
+            }
+            color
+        }
+        '🐄' => {
+            let mut color = None;
+            if ellipse(u, v, 0.24, 0.3, 0.19, 0.11) || ellipse(u, v, 0.76, 0.3, 0.19, 0.11) {
+                color = Some([176, 133, 91, 255]);
+            }
+            if ellipse(u, v, 0.5, 0.52, 0.36, 0.4) {
+                color = Some([244, 238, 221, 255]);
+            }
+            if ellipse(u, v, 0.37, 0.42, 0.13, 0.18) || ellipse(u, v, 0.67, 0.58, 0.12, 0.16) {
+                color = Some([63, 55, 49, 255]);
+            }
+            if ellipse(u, v, 0.5, 0.73, 0.25, 0.16) {
+                color = Some([232, 159, 163, 255]);
+            }
+            if ellipse(u, v, 0.4, 0.5, 0.035, 0.045)
+                || ellipse(u, v, 0.6, 0.5, 0.035, 0.045)
+                || ellipse(u, v, 0.43, 0.74, 0.03, 0.025)
+                || ellipse(u, v, 0.57, 0.74, 0.03, 0.025)
+            {
+                color = Some([35, 31, 28, 255]);
+            }
+            color
+        }
+        '🐔' => {
+            let mut color = None;
+            if ellipse(u, v, 0.43, 0.16, 0.09, 0.11)
+                || ellipse(u, v, 0.56, 0.14, 0.09, 0.11)
+                || ellipse(u, v, 0.67, 0.2, 0.08, 0.1)
+            {
+                color = Some([207, 52, 48, 255]);
+            }
+            if ellipse(u, v, 0.49, 0.53, 0.36, 0.39) {
+                color = Some([249, 240, 213, 255]);
+            }
+            if u > 0.72 && u < 0.96 && (v - 0.51).abs() < (0.96 - u) * 0.5 {
+                color = Some([239, 151, 38, 255]);
+            }
+            if ellipse(u, v, 0.62, 0.43, 0.045, 0.05) {
+                color = Some([35, 31, 28, 255]);
+            }
+            color
+        }
+        '🌾' => {
+            let stem = (u - (0.66 - v * 0.24)).abs() < 0.035 && v > 0.22;
+            let grain = (0..5).any(|index| {
+                let y = 0.2 + index as f32 * 0.115;
+                ellipse(u, v, 0.53, y, 0.12, 0.065) || ellipse(u, v, 0.72, y + 0.045, 0.12, 0.065)
+            });
+            (stem || grain).then_some([224, 174, 51, 255])
+        }
+        _ => None,
+    }
 }
 
 fn stroke_rectangle(
@@ -772,6 +927,8 @@ fn read_font(path: &Path) -> Option<FontArc> {
 }
 
 const SANS_REGULAR: &[&str] = &[
+    "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+    "/usr/share/fonts/truetype/ubuntu/UbuntuSans-R.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
@@ -779,6 +936,8 @@ const SANS_REGULAR: &[&str] = &[
     "C:\\Windows\\Fonts\\arial.ttf",
 ];
 const SANS_BOLD: &[&str] = &[
+    "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+    "/usr/share/fonts/truetype/ubuntu/UbuntuSans-B.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
@@ -802,7 +961,7 @@ const SERIF_BOLD: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{create_native_2d_host, parse_color, parse_font};
+    use super::{create_native_2d_host, css_pixels_to_ab_glyph_height, parse_color, parse_font};
     use flight_sdk::{GlImageSourceToken, SurfaceRef};
 
     #[test]
@@ -827,6 +986,11 @@ mod tests {
     }
 
     #[test]
+    fn converts_css_em_pixels_to_ab_glyph_line_height() {
+        assert_eq!(css_pixels_to_ab_glyph_height(16.0, 1200.0, 1000.0), 19.2);
+    }
+
+    #[test]
     fn exposes_mutated_canvas_pixels_to_flight_images() {
         let host = create_native_2d_host();
         let surface = (host.canvas.create_surface)(2.0, 2.0).unwrap();
@@ -846,5 +1010,30 @@ mod tests {
             .unwrap();
         assert_eq!(&token.pixels[..4], &[255, 0, 0, 255]);
         assert_eq!(&token.pixels[4..], &[0; 12]);
+    }
+
+    #[test]
+    fn renders_game_emoji_without_a_platform_emoji_font() {
+        let host = create_native_2d_host();
+        let surface = (host.canvas.create_surface)(32.0, 32.0).unwrap();
+        let erased: SurfaceRef = surface.clone();
+        let image = (host.image.create_image_from_surface.as_ref().unwrap())(&erased);
+        let context = surface.read().unwrap().context.handle.clone();
+        context.set_font("normal normal 24px system-ui, sans-serif");
+        context.fill_text("🐴", 4.0, 26.0);
+
+        let image = image.read().unwrap();
+        let token = image
+            .source
+            .handle
+            .downcast_ref::<GlImageSourceToken>()
+            .unwrap();
+        assert!(token.pixels.chunks_exact(4).any(|pixel| pixel[3] != 0));
+        assert!(
+            token
+                .pixels
+                .chunks_exact(4)
+                .any(|pixel| pixel[0] > pixel[2] && pixel[3] == 255)
+        );
     }
 }

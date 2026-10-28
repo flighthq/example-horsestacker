@@ -3,21 +3,28 @@
 use std::rc::Rc;
 
 use flight_sdk::{
-    GlRenderState, GlTextureRenderTarget, RenderProxies2D, RenderTargetClear,
-    RenderTargetColorSpace, RenderTargetDepth, RenderTargetDescriptor, RenderTargetFormat,
-    add_node_child_at, begin_gl_render_pass, create_gl_context_state, create_gl_render_state,
-    create_gl_texture_render_target, destroy_gl_render_state, destroy_gl_texture_render_target,
-    end_gl_render_pass, get_node_parent, gl_scene3d_render_preset, present_gl_render_target,
-    remove_node_child, render_gl_scene3d, render_gl_scene3d_shadow_map,
-    resize_gl_texture_render_target, resolve_gl_texture_render_target,
+    BlurEffect, EffectOperation, EffectRef, EffectStateOptions, GlEffectState, GlRenderState,
+    GlRenderTarget, Ref, RenderProxies2D, RenderTargetClear, RenderTargetColorSpace,
+    RenderTargetDepth, RenderTargetFormat, VignetteEffect, add_node_child_at, begin_gl_effect_pass,
+    create_blur_effect, create_gl_context_state, create_gl_effect_state, create_gl_render_state,
+    create_vignette_effect, destroy_gl_effect_state, destroy_gl_render_state, end_gl_effect_pass,
+    get_node_parent, gl_scene3d_render_preset, register_gl_blur_effect,
+    register_gl_particle_emitter3d_pass, register_gl_vignette_effect, remove_node_child,
+    render_gl_scene3d, render_gl_scene3d_shadow_map, resize_gl_texture_render_target,
+    resolve_gl_texture_render_target,
 };
 use glow::HasContext;
 
 use super::SceneGraph;
 
+const BACKDROP_BLUR_MAX: f32 = 13.0;
+
 pub struct SceneRenderer {
     pub render_state: GlRenderState,
-    target: GlTextureRenderTarget,
+    pub pipeline: GlEffectState,
+    backdrop_blur_effect: Ref<BlurEffect>,
+    backdrop_vignette_effect: Ref<VignetteEffect>,
+    backdrop_effects_at: i32,
     native_vertex_array: glow::NativeVertexArray,
 }
 
@@ -44,40 +51,47 @@ pub fn create_scene_renderer(
     })?;
     eprintln!("[horse-stacker] GL compatibility: native default VAO installed");
     let options = gl_scene3d_render_preset();
-    let render_state = create_gl_render_state(context_state, Some(&options));
-    let target = create_gl_texture_render_target(
+    let mut render_state = create_gl_render_state(context_state, Some(&options));
+    register_gl_particle_emitter3d_pass(&mut render_state);
+    register_gl_blur_effect(&mut render_state);
+    register_gl_vignette_effect(&mut render_state);
+    let pipeline = create_gl_effect_state(
         &render_state,
-        &RenderTargetDescriptor {
-            width: width as f32,
-            height: height as f32,
-            format: Some(RenderTargetFormat::Rgba16F),
-            color_attachments: None,
-            color_formats: None,
+        Some(&EffectStateOptions {
             sample_count: Some(4.0),
+            format: Some(RenderTargetFormat::Rgba16F),
             depth: Some(RenderTargetDepth::DepthStencil),
-            color_space: Some(RenderTargetColorSpace::Linear),
-        },
-        None,
-    )?
-    .ok_or_else(|| "Flight could not allocate the scene render target".to_owned())?;
+        }),
+    );
+    let backdrop_blur_effect = create_blur_effect();
+    {
+        let mut effect = backdrop_blur_effect.write().unwrap();
+        effect.blur_x = Some(0.0);
+        effect.blur_y = Some(0.0);
+    }
+    let backdrop_vignette_effect = create_vignette_effect();
+    {
+        let mut effect = backdrop_vignette_effect.write().unwrap();
+        effect.color = Some(0x0d1622ff);
+        effect.intensity = Some(0.0);
+        effect.radius = Some(0.5);
+        effect.softness = Some(0.85);
+    }
     eprintln!(
-        "[horse-stacker] scene target: {}x{} format={:?} samples={} depth={:?} color_space={:?}",
-        target.axes.width,
-        target.axes.height,
-        target.axes.format,
-        target.axes.sample_count,
-        target.axes.depth,
-        target.axes.color_space,
+        "[horse-stacker] scene pipeline: {width}x{height} format=Rgba16F samples=4 depth=DepthStencil color_space=Linear particles=registered effects=blur+vignette",
     );
     Ok(SceneRenderer {
         render_state,
-        target,
+        pipeline,
+        backdrop_blur_effect,
+        backdrop_vignette_effect,
+        backdrop_effects_at: -1,
         native_vertex_array,
     })
 }
 
 impl SceneRenderer {
-    pub fn draw_scene(&mut self, scene_graph: &SceneGraph) {
+    pub fn draw_scene(&mut self, scene_graph: &SceneGraph, backdrop_focus: f32) {
         let preview_parent = get_node_parent(&scene_graph.preview_layer);
         let sky_node = scene_graph.sky_dome.clone();
         let sky_node: flight_sdk::NodeRef = sky_node;
@@ -103,35 +117,67 @@ impl SceneRenderer {
         if let Some(parent) = &sky_parent {
             add_node_child_at(parent, &sky_node, 0);
         }
-        let pass = begin_gl_render_pass(
-            &self.render_state,
-            &self.target,
+        let pass = begin_gl_effect_pass(
+            &mut self.render_state,
+            &mut self.pipeline,
             Some(&RenderTargetClear {
                 color: Some([0.0, 0.0, 0.0, 0.0]),
                 depth: Some(1.0),
-                stencil: Some(0),
                 ..RenderTargetClear::default()
             }),
-            None,
+            Some(RenderTargetColorSpace::Linear),
         )
         .unwrap_or_else(|error| flight_sdk::throw_error(&error));
         render_gl_scene3d(
             &mut self.render_state,
             &pass,
-            Some(&mut self.target),
+            self.pipeline
+                .scene_target
+                .as_mut()
+                .map(|target| target as &mut dyn GlRenderTarget),
             &scene_graph.root,
             &scene_graph.camera,
             &scene_graph.lights,
             None,
         );
-        end_gl_render_pass(&self.render_state, &pass)
-            .unwrap_or_else(|error| flight_sdk::throw_error(&error));
         // At the pinned Flight revision, end_gl_render_pass's snapshot resolve does not populate a
-        // multisampled target on native desktop GL. Resolve the concrete target before its texture
-        // is sampled by the presentation pass. The call is a no-op for a single-sample fallback.
-        resolve_gl_texture_render_target(&self.render_state, &self.target);
-        present_gl_render_target(&mut self.render_state, &self.target, None)
-            .unwrap_or_else(|error| flight_sdk::throw_error(&error));
+        // multisampled target on native desktop GL. Resolve the concrete effect target while the
+        // scene pass is still active, before end_gl_effect_pass samples it for effects/presentation.
+        // The call is a no-op for a single-sample fallback.
+        if let Some(target) = self.pipeline.scene_target.as_ref() {
+            resolve_gl_texture_render_target(&self.render_state, target);
+        }
+        let active_effects = self.get_backdrop_effects(backdrop_focus);
+        end_gl_effect_pass(
+            &mut self.render_state,
+            &pass,
+            &mut self.pipeline,
+            &active_effects,
+        )
+        .unwrap_or_else(|error| flight_sdk::throw_error(&error));
+    }
+
+    fn get_backdrop_effects(&mut self, focus: f32) -> Vec<EffectOperation> {
+        if focus <= 0.002 {
+            return Vec::new();
+        }
+        let quantized = (focus.clamp(0.0, 1.0) * 60.0).round() as i32;
+        if quantized != self.backdrop_effects_at {
+            self.backdrop_effects_at = quantized;
+            let amount = quantized as f32 / 60.0;
+            {
+                let mut effect = self.backdrop_blur_effect.write().unwrap();
+                effect.blur_x = Some(BACKDROP_BLUR_MAX * amount);
+                effect.blur_y = Some(BACKDROP_BLUR_MAX * amount);
+            }
+            self.backdrop_vignette_effect.write().unwrap().intensity = Some(0.7 * amount);
+        }
+        let blur: EffectRef = self.backdrop_blur_effect.clone();
+        let vignette: EffectRef = self.backdrop_vignette_effect.clone();
+        vec![
+            EffectOperation::Effect(blur),
+            EffectOperation::Effect(vignette),
+        ]
     }
 
     pub fn bind_native_vertex_array(&self) {
@@ -146,22 +192,20 @@ impl SceneRenderer {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) -> Result<bool, String> {
-        if self.target.axes.width == width && self.target.axes.height == height {
+        let Some(target) = self.pipeline.scene_target.as_mut() else {
+            return Ok(false);
+        };
+        if target.axes.width == width && target.axes.height == height {
             return Ok(false);
         }
-        resize_gl_texture_render_target(
-            &self.render_state,
-            &mut self.target,
-            width as f32,
-            height as f32,
-        )?;
+        resize_gl_texture_render_target(&self.render_state, target, width as f32, height as f32)?;
         Ok(true)
     }
 }
 
 impl Drop for SceneRenderer {
     fn drop(&mut self) {
-        destroy_gl_texture_render_target(&mut self.target);
+        destroy_gl_effect_state(&self.render_state, &mut self.pipeline);
         let mut proxies = RenderProxies2D::<GlRenderState>::default();
         destroy_gl_render_state(&mut self.render_state, &mut proxies);
         // SAFETY: native shutdown runs while the owning context is current.
