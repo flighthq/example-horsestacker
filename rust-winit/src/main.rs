@@ -447,11 +447,18 @@ impl HorseStackerApp {
                 size.height.max(1),
             );
             renderer.draw_scene(&self.scene_graph);
+            let scene_error = if trace_frame {
+                // SAFETY: the renderer's context is current on this event-loop thread.
+                unsafe { renderer.render_state.gl.get_error() }
+            } else {
+                glow::NO_ERROR
+            };
+            renderer.bind_native_vertex_array();
             if trace_frame {
                 let runtime = renderer.render_state.gl_runtime.borrow();
                 let stats = &runtime.stats;
                 eprintln!(
-                    "[horse-stacker] frame {}: 3D pass complete draws={} triangles={} programs={} framebuffers={}",
+                    "[horse-stacker] frame {}: 3D pass complete draws={} triangles={} programs={} framebuffers={} gl_error=0x{scene_error:04x}",
                     self.frames_presented + 1,
                     stats.draw_calls,
                     stats.triangles,

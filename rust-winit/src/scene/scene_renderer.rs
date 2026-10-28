@@ -10,12 +10,14 @@ use flight_sdk::{
     gl_scene3d_render_preset, present_gl_scene3d, remove_node_child, render_gl_scene3d_shadow_map,
     resize_gl_texture_render_target,
 };
+use glow::HasContext;
 
 use super::SceneGraph;
 
 pub struct SceneRenderer {
     pub render_state: GlRenderState,
     target: GlTextureRenderTarget,
+    native_vertex_array: glow::NativeVertexArray,
 }
 
 pub fn create_scene_renderer(
@@ -23,7 +25,23 @@ pub fn create_scene_renderer(
     width: u32,
     height: u32,
 ) -> Result<SceneRenderer, String> {
-    let context_state = create_gl_context_state(gl)?;
+    // WebGL supplies a default vertex array. Desktop core GL deliberately does not: binding an
+    // element buffer or defining an attribute while VAO 0 is current is INVALID_OPERATION. Flight's
+    // shared quad setup and its 2D renderers use the WebGL model, so give those operations a durable
+    // native VAO before the context state uploads its shared index buffer.
+    // SAFETY: creation and binding happen on the current GL context's event-loop thread.
+    let native_vertex_array = unsafe {
+        let vertex_array = gl
+            .create_vertex_array()
+            .map_err(|error| format!("create native compatibility vertex array: {error}"))?;
+        gl.bind_vertex_array(Some(vertex_array));
+        vertex_array
+    };
+    let context_state = create_gl_context_state(Rc::clone(&gl)).inspect_err(|_| {
+        // SAFETY: the context is still current and no Flight state retained the failed VAO.
+        unsafe { gl.delete_vertex_array(native_vertex_array) };
+    })?;
+    eprintln!("[horse-stacker] GL compatibility: native default VAO installed");
     let options = gl_scene3d_render_preset();
     let render_state = create_gl_render_state(context_state, Some(&options));
     let target = create_gl_texture_render_target(
@@ -53,6 +71,7 @@ pub fn create_scene_renderer(
     Ok(SceneRenderer {
         render_state,
         target,
+        native_vertex_array,
     })
 }
 
@@ -92,6 +111,17 @@ impl SceneRenderer {
         );
     }
 
+    pub fn bind_native_vertex_array(&self) {
+        // Fullscreen and mesh passes own temporary VAOs and restore VAO 0. Rebind the compatibility
+        // VAO before Flight's 2D renderers, whose buffer/attribute setup follows WebGL semantics.
+        // SAFETY: the VAO belongs to this current context and is used only on the event-loop thread.
+        unsafe {
+            self.render_state
+                .gl
+                .bind_vertex_array(Some(self.native_vertex_array));
+        }
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) -> Result<bool, String> {
         if self.target.axes.width == width && self.target.axes.height == height {
             return Ok(false);
@@ -111,5 +141,12 @@ impl Drop for SceneRenderer {
         destroy_gl_texture_render_target(&mut self.target);
         let mut proxies = RenderProxies2D::<GlRenderState>::default();
         destroy_gl_render_state(&mut self.render_state, &mut proxies);
+        // SAFETY: native shutdown runs while the owning context is current.
+        unsafe {
+            self.render_state.gl.bind_vertex_array(None);
+            self.render_state
+                .gl
+                .delete_vertex_array(self.native_vertex_array);
+        }
     }
 }
