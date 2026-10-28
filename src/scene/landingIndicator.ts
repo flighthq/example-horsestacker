@@ -27,7 +27,7 @@ import {
   setQuaternionFromEuler,
   StandardPbrMaterialKind,
 } from '@flighthq/sdk';
-import type { Material, Node3D, PointLight, StandardPbrMaterial } from '@flighthq/sdk';
+import type { Material3D, Node3D, PointLight, StandardPbrMaterial } from '@flighthq/sdk';
 import {
   INDICATOR_DAMPING,
   INDICATOR_MAX_ANGLE,
@@ -116,11 +116,11 @@ export function createLandingIndicator(
   });
   // Derived materials are cached per source material: a clone is built for every preview, and
   // the same handful of source materials come round again every time.
-  const previewMaterials = new WeakMap<Material, Material>();
+  const previewMaterials = new WeakMap<Material3D, Material3D>();
 
   // The preview's version of one of an object's own materials: its colour pulled halfway to
   // the marker gold, lit by the marker's emissive at the same fraction.
-  function toPreviewMaterial(source: Material | null): Material | null {
+  function toPreviewMaterial(source: Material3D | null): Material3D | null {
     if (source === null) return ghostMaterial;
     const cached = previewMaterials.get(source);
     if (cached !== undefined) return cached;

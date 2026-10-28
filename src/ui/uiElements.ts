@@ -9,12 +9,12 @@
 import type { DisplayObject, Shape, TextLabel } from '@flighthq/sdk';
 import {
   appendShapeBeginFill,
-  appendShapeCurveTo,
+  appendShapeQuadraticCurveTo,
   appendShapeLineStyle,
   appendShapeLineTo,
   appendShapeMoveTo,
   appendShapePolygon,
-  appendShapeRoundRectangle,
+  appendShapeRoundedRectangle,
   clearShapeCommands,
   computeTextFormatFontString,
   createTextLabel,
@@ -81,7 +81,7 @@ export function fill(
 ): void {
   clearShapeCommands(shape);
   appendShapeBeginFill(shape, colour, alpha);
-  appendShapeRoundRectangle(shape, x, y, w, h, r, r);
+  appendShapeRoundedRectangle(shape, x, y, w, h, r);
   invalidateNodeRender(shape);
 }
 
@@ -174,9 +174,9 @@ export function drawSpeaker(shape: Shape, colour: number, alpha: number, muted: 
     // at this weight and this size they came back clean, and they say "sound" in a way two
     // bars never quite did.
     appendShapeMoveTo(shape, 4, -3);
-    appendShapeCurveTo(shape, 6.4, 0, 4, 3);
+    appendShapeQuadraticCurveTo(shape, 6.4, 0, 4, 3);
     appendShapeMoveTo(shape, 7, -5.5);
-    appendShapeCurveTo(shape, 10.2, 0, 7, 5.5);
+    appendShapeQuadraticCurveTo(shape, 10.2, 0, 7, 5.5);
   }
   invalidateNodeRender(shape);
 }

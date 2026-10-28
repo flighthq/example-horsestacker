@@ -22,7 +22,7 @@ import {
   setAudioChannelMuted,
   stopAudioChannel,
 } from '@flighthq/sdk/media';
-import { webAudioDeviceBackend, webHostNet } from '@flighthq/host-web';
+import { webHostAudioDecode, webHostAudioDevice, webHostNet } from '@flighthq/host-web';
 import {
   AMBIENCE_FADE_AFTER_MS,
   AMBIENCE_FADE_MS,
@@ -101,11 +101,8 @@ const SOUND_FILES: Readonly<Record<SoundName, string>> = {
 };
 
 export function createAudioManager(soundRootUrl: string): AudioManager {
-  // Created lazily, not at construction. A browser hands back a SUSPENDED context when there
-  // has been no user gesture yet, and a suspended context decodes but never sounds — so the
-  // first round would play silently and every later one would be fine, which is the most
-  // confusing possible version of this bug.
-  let context: AudioContext | null = null;
+  // Created lazily, not at construction. The web host creates its AudioContext behind this
+  // handle; doing that before a user gesture would leave the device suspended.
   let deviceHandle: AudioDeviceHandle | null = null;
 
   const resources = new Map<SoundName, AudioResource>();
@@ -126,27 +123,22 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   let wantSoundtrack = false;
   let wantAmbience = false;
 
-  function ensureContext(): AudioContext | null {
-    if (context === null) {
-      const Ctor: typeof AudioContext | undefined =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (Ctor === undefined) return null;
-      context = new Ctor();
-      deviceHandle = webAudioDeviceBackend.createDevice(context.sampleRate);
-      void loadAll(context);
+  function ensureDevice(): AudioDeviceHandle | null {
+    if (deviceHandle === null) {
+      if (window.AudioContext === undefined) return null;
+      deviceHandle = webHostAudioDevice.createDevice(48_000);
+      void loadAll();
     }
-    if (context.state === 'suspended') void context.resume().catch(() => undefined);
-    if (deviceHandle !== null) webAudioDeviceBackend.resumeDevice(deviceHandle);
-    return context;
+    webHostAudioDevice.resumeDevice(deviceHandle);
+    return deviceHandle;
   }
 
-  async function loadAll(target: AudioContext): Promise<void> {
+  async function loadAll(): Promise<void> {
     await Promise.all(
       (Object.keys(SOUND_FILES) as SoundName[]).map(async (name) => {
         const url = new URL(encodeURIComponent(SOUND_FILES[name]), soundRootUrl).href;
         try {
-          resources.set(name, await loadAudioResourceFromUrl(webHostNet, target, url));
+          resources.set(name, await loadAudioResourceFromUrl(webHostNet, webHostAudioDecode, url));
         } catch (error) {
           console.info(`${name} could not be loaded.`, error);
         }
@@ -155,10 +147,10 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
   }
 
   function play(name: SoundName, loops = 0, startAt = 0): AudioChannel | null {
-    ensureContext();
+    ensureDevice();
     const resource = resources.get(name);
     if (deviceHandle === null || resource === undefined) return null;
-    const channel = playAudioResource(webAudioDeviceBackend, deviceHandle, resource, {
+    const channel = playAudioResource(webHostAudioDevice, deviceHandle, resource, {
       currentTime: startAt,
       gain: GAIN[name],
       loops,
@@ -241,7 +233,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
 
     setMuted(next) {
       muted = next;
-      ensureContext();
+      ensureDevice();
       if (soundtrackChannel !== null) setAudioChannelMuted(soundtrackChannel, muted);
       if (ambienceChannel !== null) setAudioChannelMuted(ambienceChannel, muted);
       if (whinnyChannel !== null) setAudioChannelMuted(whinnyChannel, muted);
@@ -293,7 +285,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
     },
 
     startRound(now, mode) {
-      ensureContext();
+      ensureDevice();
       stopWhinny();
       nextHorseWhinnyAt =
         now + HORSE_WHINNY_MIN_INTERVAL_MS + Math.random() * HORSE_WHINNY_INTERVAL_JITTER_MS;
@@ -337,7 +329,7 @@ export function createAudioManager(soundRootUrl: string): AudioManager {
       if (now - idleSince < AMBIENCE_FADE_AFTER_MS) return;
       ambienceFaded = true;
       if (ambienceChannel !== null) {
-        fadeAudioChannelGain(ambienceChannel, 0, AMBIENCE_FADE_MS);
+        fadeAudioChannelGain(webHostAudioDevice, ambienceChannel, 0, AMBIENCE_FADE_MS);
       }
     },
   };

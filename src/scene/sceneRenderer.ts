@@ -9,44 +9,34 @@
 // frame is the latter plus two calls.
 import type {
   BlurEffect,
-  GlRenderEffectPipeline,
+  Effect,
+  GlEffectState,
   GlRenderState,
-  RenderEffect,
   VignetteEffect,
 } from '@flighthq/sdk';
 import {
   addNodeChildAt,
-  beginGlRenderEffectPipeline,
-  beginGlRenderPass,
+  beginGlEffectPass,
   createBlurEffect,
-  createEmptyGlRegistries,
-  createGlCanvasElement,
-  createGlContextFromCanvasElement,
-  createGlContextState,
-  createGlPipeline,
-  createGlRenderEffectPipeline,
+  createGlEffectState,
   createGlRenderState,
   createVignetteEffect,
   enableFlightDiagnostics,
-  endGlRenderEffectPipeline,
-  endGlRenderPass,
+  endGlEffectPass,
   getNodeParent,
+  glScene3DRenderPreset,
   registerGlBlurEffect,
-  registerGlStandardPbrMaterial,
-  registerGlVertexColorMaterial,
   registerGlVignetteEffect,
-  registerStandardGlTextureResolvers,
   removeNodeChild,
-  renderGlBackground,
 } from '@flighthq/sdk';
-import { drawGlScene3D, drawGlScene3DShadowMap, registerGlUnlitMaterial } from '@flighthq/sdk/rendering';
-import { enableHostWebGlRenderSurface } from '@flighthq/host-web';
+import { renderGlScene3D, renderGlScene3DShadowMap } from '@flighthq/sdk/scene3d-gl';
+import { createWebGlContext, webHostCanvas, webHostImage } from '@flighthq/host-web';
 import type { SceneGraph } from './sceneGraph';
 
 export interface SceneRenderer {
   canvas: HTMLCanvasElement;
   renderState: GlRenderState;
-  pipeline: GlRenderEffectPipeline;
+  pipeline: GlEffectState;
   /**
    * Draw one 3D frame. `backdropFocus` is 0 during play and ramps to 1 behind the menus;
    * at 0 the effect list is empty, which is the pipeline's own fast path.
@@ -59,14 +49,14 @@ export interface SceneRenderer {
 // The title and score screens used to sit behind a flat black wash. The scene is the nicest
 // thing on screen, so instead of hiding it the pipeline defocuses it: a real blur, plus a
 // vignette to pull the eye to the middle and keep light text legible over bright grass.
-// Both are Flight render effects, which is what the effect list on endGlRenderEffectPipeline
-// is for — the game ran it empty until now.
+// Both are Flight render effects, which is what the effect list on endGlEffectPass is for —
+// the game ran it empty until now.
 const BACKDROP_BLUR_MAX = 13;
 // Just defocus, and nothing else. A colour grade behind the blur — desaturation, an
 // exposure drop, a warm tint — all read as a filter laid over the game rather than as depth
 // of field, so the scene keeps its own colour and the vignette alone does the separating.
 // It buys the type less contrast than a grade would; the scene staying itself is worth it.
-const NO_EFFECTS: readonly RenderEffect[] = [];
+const NO_EFFECTS: readonly Effect[] = [];
 
 /**
  * Builds the canvas, the GL state and the pipeline, appending the canvas to `viewer`.
@@ -74,9 +64,10 @@ const NO_EFFECTS: readonly RenderEffect[] = [];
  * than this module reaching for the DOM it does not otherwise touch.
  */
 export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
-  enableHostWebGlRenderSurface();
   const initialPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const canvas = createGlCanvasElement(1, 1, initialPixelRatio);
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
   canvas.setAttribute(
     'aria-label',
     'Horse Stacker game. Position the next farm object with the pointer or the arrow keys — placement is free, so you choose the height as well as the side — then click, tap, Space, or Enter to place it.',
@@ -87,27 +78,22 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   viewer.prepend(canvas);
 
   const renderState = createGlRenderState(
-    createGlContextState(
-      createGlContextFromCanvasElement(canvas, {
-        antialias: false,
-        contextAttributes: { alpha: true },
-        powerPreference: 'high-performance',
-      }),
-    ),
-    createGlPipeline(createEmptyGlRegistries()),
+    createWebGlContext(canvas, {
+      antialias: false,
+      contextAttributes: { alpha: true },
+      powerPreference: 'high-performance',
+    }),
     {
+      ...glScene3DRenderPreset,
+      canvasHost: webHostCanvas,
+      imageHost: webHostImage,
       pixelRatio: initialPixelRatio,
-      backgroundColor: 0x00000000,
     },
   );
   if (import.meta.env.DEV) enableFlightDiagnostics(renderState);
-  registerStandardGlTextureResolvers(renderState);
-  registerGlStandardPbrMaterial(renderState);
-  registerGlUnlitMaterial(renderState);
-  registerGlVertexColorMaterial(renderState);
   registerGlBlurEffect(renderState);
   registerGlVignetteEffect(renderState);
-  const pipeline = createGlRenderEffectPipeline(renderState, {
+  const pipeline = createGlEffectState(renderState, {
     sampleCount: 4,
     format: 'rgba16f',
     depth: 'depth-stencil',
@@ -122,10 +108,10 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
   });
   // Rebuilt only while the ramp is moving: brightness/contrast bake their matrix at
   // construction, so a mutated field would not take.
-  let backdropEffects: RenderEffect[] = [];
+  let backdropEffects: Effect[] = [];
   let backdropEffectsAt = -1;
 
-  function getBackdropEffects(focus: number): readonly RenderEffect[] {
+  function getBackdropEffects(focus: number): readonly Effect[] {
     const quantized = Math.round(focus * 60);
     if (quantized === backdropEffectsAt) return backdropEffects;
     backdropEffectsAt = quantized;
@@ -155,30 +141,23 @@ export function createSceneRenderer(viewer: HTMLElement): SceneRenderer {
       // draws every node with geometry, and a dome that ENCLOSES the shadow camera would
       // write depth in front of the whole farm and shadow all of it.
       if (skyParent !== null) removeNodeChild(skyParent, skyDome);
-      drawGlScene3DShadowMap(renderState, root, shadowCamera, directionalLight);
+      renderGlScene3DShadowMap(renderState, root, shadowCamera, directionalLight);
       if (previewParent !== null) addNodeChildAt(previewParent, previewLayer, 0);
       if (skyParent !== null) addNodeChildAt(skyParent, skyDome, 0);
 
-      beginGlRenderEffectPipeline(renderState, pipeline, 'linear');
-      renderGlBackground(renderState);
-      // The pipeline opens its pass preserving BOTH aspects, so last frame's depth is still
-      // in the target and the scene has to start from a cleared one. A nested pass that
-      // spares only the colour does exactly that, using the target's own clear values — the
-      // same job three raw depthMask/clearDepth/clear calls used to do by hand.
-      const sceneTarget = pipeline.sceneTarget;
-      if (sceneTarget !== null) {
-        beginGlRenderPass(renderState, sceneTarget, { preserveColor: true });
-        drawGlScene3D(renderState, root, camera, lights);
-        endGlRenderPass(renderState);
-      }
+      // The new pass owns target allocation, transparent colour/depth clear, MSAA resolve,
+      // post-processing and presentation. 3D draw calls receive the pass explicitly.
+      const scenePass = beginGlEffectPass(
+        renderState,
+        pipeline,
+        { color: [0, 0, 0, 0], depth: 1 },
+        'linear',
+      );
+      renderGlScene3D(scenePass, root, camera, lights);
       // An empty list is the fast path: no ping-pong targets are acquired and no pass runs,
       // so the game pays for the defocus only on the screens that show it.
       const activeEffects = backdropFocus > 0.002 ? getBackdropEffects(backdropFocus) : NO_EFFECTS;
-      endGlRenderEffectPipeline(
-        renderState,
-        pipeline,
-        activeEffects,
-      );
+      endGlEffectPass(scenePass, pipeline, activeEffects);
     },
 
     resize(width, height, pixelRatio) {

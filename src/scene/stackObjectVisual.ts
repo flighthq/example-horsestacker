@@ -36,7 +36,7 @@ import {
   setInstancedMeshInstanceMatrix,
   setQuaternionFromEuler,
 } from '@flighthq/sdk';
-import type { InstancedMesh, Material, Matrix4, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
+import type { InstancedMesh, Material3D, Matrix4, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
 
 import { FARM_PROP_VARIANTS } from '../data/farmPropGeometry';
 import {
@@ -58,7 +58,7 @@ const VISUAL_OFFSET_Y: Partial<Record<StackObjectKind, number>> = {
 };
 
 /** Replaces each source material on a clone. Null leaves the piece's own materials alone. */
-export type MaterialMapper = (material: Material | null) => Material | null;
+export type MaterialMapper = (material: Material3D | null) => Material3D | null;
 
 /** Opaque handle for a placed piece's instanced visual. */
 export interface StackVisualHandle {

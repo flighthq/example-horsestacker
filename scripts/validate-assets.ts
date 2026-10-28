@@ -1,6 +1,6 @@
 import type { ImportDiagnostic, Mesh, Node3D, Scene3D } from '@flighthq/sdk';
-import { getNodeChildren } from '@flighthq/sdk/core';
-import { createScene3DFromGltf } from '@flighthq/sdk/formats';
+import { getNodeChildren } from '@flighthq/sdk/node';
+import { createScene3DFromGltf } from '@flighthq/sdk/scene3d-formats';
 import { createNode3D, Node3DKind } from '@flighthq/sdk';
 import { mountFarm } from '../src/scene/modelLoader';
 import { sampleFarmTerrain } from '../src/scene/terrainProfile';

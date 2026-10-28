@@ -49,7 +49,7 @@ export interface SceneGraph {
   /**
    * The hovering preview and its halo ring share one parent so a single detach keeps both
    * out of the shadow pass. They must LEAVE the graph to be excluded:
-   * drawGlScene3DShadowMap walks every descendant carrying geometry and never consults
+   * renderGlScene3DShadowMap walks every descendant carrying geometry and never consults
    * `enabled`, `visible`, or the material's alpha mode, so hiding a node does not stop it
    * casting. That is why the halo used to lay a ring of shadow across the pasture despite
    * being switched off for the pass.

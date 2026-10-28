@@ -36,7 +36,7 @@ import type {
   Node3D,
   Scene3D,
 } from '@flighthq/sdk';
-import { createScene3DFromGltf } from '@flighthq/sdk/formats';
+import { createScene3DFromGltf } from '@flighthq/sdk/scene3d-formats';
 import {
   FARM_PROP_SCENE_SCALE,
   FARM_PROP_VARIANTS,

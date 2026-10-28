@@ -6,7 +6,7 @@
 // state over the SAME GL context, then presented onto the finished 3D frame as a single
 // blended quad. All public SDK: beginGlRenderPass/endGlRenderPass own the target, its clear
 // and the save/restore of enclosing state; presentGlRenderTarget lays the finished target
-// over the canvas; destroyGlRenderTarget hands its GL objects back.
+// over the canvas; destroyGlTextureRenderTarget hands its GL objects back.
 //
 // present reads the target's DECLARED colour space, so an 'srgb' target — which a 2D scene
 // is, because Flight's 2D tower composites in the encoded domain by policy
@@ -21,40 +21,26 @@
 //     came out washed.
 //
 // Two more things make this work, each of which broke an earlier attempt:
-//   - the second state comes from createGlOffscreenRenderState, so its renderer/material
-//     registrations and per-frame batch state are its own. Sharing one state with the 3D
+//   - the second state comes from createGlRenderState with the 2D preset, so its renderer/
+//     material registrations and per-frame batch state are its own. Sharing one state with the 3D
 //     pipeline corrupts the 3D — props lose their textures.
 //   - present runs immediately after the 2D pass closes, which is where renderGlScene2D has
 //     already left blending on and depth/cull off — the state the blend needs. It also owns
 //     its own VAO and unbinds what it sampled, so nothing leaks into the next frame's 3D.
-import type { DisplayObject, GlRenderState, GlRenderTarget } from '@flighthq/sdk';
+import type { DisplayObject, GlRenderState, GlTextureRenderTarget } from '@flighthq/sdk';
 import {
   beginGlRenderPass,
-  createCanvasShapeRasterizer,
-  createCanvasTextureResolvers,
-  createGlOffscreenRenderState,
-  createGlRenderTarget,
+  createGlRenderState,
+  createGlTextureRenderTarget,
   createMatrix,
-  defaultGlRichTextRenderer,
-  defaultGlShapeCommands,
-  defaultGlShapeRenderer,
-  defaultGlTextLabelRenderer,
-  destroyGlRenderTarget,
+  destroyGlTextureRenderTarget,
   endGlRenderPass,
+  glScene2DRenderPreset,
   prepareScene2DRender,
   presentGlRenderTarget,
-  registerGlShapeCommands,
-  registerGlShapeRasterizer,
-  registerGlStandardMaterial,
-  registerRenderer,
   renderGlScene2D,
-  RichTextKind,
-  scene2dGlPipeline,
-  setGlRenderTransform2D,
-  ShapeKind,
-  TextLabelKind,
 } from '@flighthq/sdk';
-import { webCanvasRenderSurfaceCreator, webRaster2DSurfaceProvider } from '@flighthq/host-web';
+import { webHostCanvas, webHostImage } from '@flighthq/host-web';
 
 export interface UiRenderer {
   /** The offscreen state the UI's nodes are prepared and drawn against. */
@@ -69,18 +55,14 @@ export function createUiRenderer(
   screenState: GlRenderState,
   pixelRatio: number,
 ): UiRenderer {
-  const state: GlRenderState = createGlOffscreenRenderState(screenState.contextState, scene2dGlPipeline, {
-    raster2DSurfaceProvider: webRaster2DSurfaceProvider,
+  const state: GlRenderState = createGlRenderState(screenState.gl, {
+    ...glScene2DRenderPreset,
+    canvasHost: webHostCanvas,
+    imageHost: webHostImage,
+    pixelRatio,
   });
-  let target: GlRenderTarget | null = null;
+  let target: GlTextureRenderTarget | null = null;
   let deviceTransform = createMatrix(pixelRatio, 0, 0, pixelRatio, 0, 0);
-
-  registerRenderer(state, ShapeKind, defaultGlShapeRenderer);
-  registerRenderer(state, TextLabelKind, defaultGlTextLabelRenderer);
-  registerRenderer(state, RichTextKind, defaultGlRichTextRenderer);
-  registerGlShapeCommands(state, defaultGlShapeCommands);
-  registerGlShapeRasterizer(state, createCanvasShapeRasterizer(createCanvasTextureResolvers(webCanvasRenderSurfaceCreator)));
-  registerGlStandardMaterial(state);
 
   return {
     state,
@@ -92,30 +74,25 @@ export function createUiRenderer(
       // pixels and stays crisp rather than being resampled by the composite. Resizing
       // allocates a new one, so the old one has to go back or every resize leaks a
       // screen-sized texture.
-      if (target !== null) destroyGlRenderTarget(state, target);
-      target = createGlRenderTarget(state, {
-        width: Math.round(width * nextPixelRatio),
-        height: Math.round(height * nextPixelRatio),
+      if (target !== null) destroyGlTextureRenderTarget(target);
+      target = createGlTextureRenderTarget(state, {
+        width: Math.max(1, Math.round(width * nextPixelRatio)),
+        height: Math.max(1, Math.round(height * nextPixelRatio)),
         depth: 'none',
+        colorSpace: 'srgb',
       });
     },
 
     render(root) {
       const surface = target;
       if (surface === null) return;
-      // The device transform must be set BEFORE prepare, not after begin: it is an input to
-      // every prepared proxy transform, so setting it later leaves the frame laid out at 1:1
-      // in a target sized in device pixels — on a 2x display the whole UI drew into the
-      // top-left quarter, and the buttons stopped being where their hit boxes were.
-      setGlRenderTransform2D(state, deviceTransform);
       if (!prepareScene2DRender(state, root)) return;
 
-      // Draw the UI into its own target. begin binds and clears it, end resolves and puts the
-      // enclosing binding and viewport back, so the frame the 3D pipeline just presented is
-      // untouched. The bracket also saves and restores the transform set above.
-      beginGlRenderPass(state, surface);
-      renderGlScene2D(state, root);
-      endGlRenderPass(state);
+      // The draw call receives the logical-to-device transform explicitly. The render target
+      // is device-sized, while layout and hit-testing remain in logical pixels.
+      const pass = beginGlRenderPass(state, surface, { color: [0, 0, 0, 0] });
+      renderGlScene2D(pass, root, deviceTransform);
+      endGlRenderPass(pass);
 
       // Lay it over that frame. See the colour-space note at the top of the file.
       presentGlRenderTarget(state, surface);
