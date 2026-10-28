@@ -15,11 +15,12 @@ pub fn centred_collider_polygons(kind: StackObjectKind) -> Option<Vec<Vec<f64>>>
                     .into_iter()
                     .enumerate()
                     .map(|(index, value)| {
-                        value - if index % 2 == 0 {
-                            centroid_x
-                        } else {
-                            centroid_y
-                        }
+                        value
+                            - if index % 2 == 0 {
+                                centroid_x
+                            } else {
+                                centroid_y
+                            }
                     })
                     .collect()
             })
@@ -52,11 +53,7 @@ pub fn polygon_area_centroid(points: &[f64]) -> [f64; 3] {
         return [0.0, 0.0, 0.0];
     }
     let scale = 1.0 / (3.0 * twice_area);
-    [
-        twice_area / 2.0,
-        centroid_x * scale,
-        centroid_y * scale,
-    ]
+    [twice_area / 2.0, centroid_x * scale, centroid_y * scale]
 }
 
 pub fn horse_collider_polygons() -> Vec<Vec<f64>> {

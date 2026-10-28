@@ -32,8 +32,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_alpha_size(8)
         .with_depth_size(24)
         .with_stencil_size(8);
-    let display_builder =
-        DisplayBuilder::new().with_window_attributes(Some(window_attributes()));
+    let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes()));
     let mut app = HorseStackerApp::new(template, display_builder);
 
     event_loop.run_app(&mut app)?;
@@ -192,11 +191,7 @@ impl ApplicationHandler for HorseStackerApp {
 
         let size = window.inner_size();
         if self.renderer.is_none() {
-            match FlightRenderer::new(
-                &gl_config.display(),
-                size.width.max(1),
-                size.height.max(1),
-            ) {
+            match FlightRenderer::new(&gl_config.display(), size.width.max(1), size.height.max(1)) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {
                     self.fail(event_loop, error);
