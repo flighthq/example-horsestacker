@@ -13,6 +13,10 @@ const CELEBRATION_COLORS: [u32; 7] = [
     0xffd166ff, 0xef8354ff, 0x7ea16bff, 0xf7ede2ff, 0x8ecae6ff, 0xe5989bff, 0xb08fd8ff,
 ];
 const DUST_COLOR: u32 = 0xe8d6a9cc;
+// Keep the TS-authored range recognizable while compensating for the native pass presenting
+// an untextured particle's scale as its full world-space side length. At the farm's scale, the raw
+// 0.05..0.135 range reads as paper sheets; half-size reads as individual pieces of confetti.
+const NATIVE_CELEBRATION_SCALE: f32 = 0.5;
 
 pub struct ParticleEffects {
     dust_emitter: Ref<ParticleEmitter3D>,
@@ -170,8 +174,8 @@ fn create_celebration_config() -> ParticleEmitterConfig {
         rotation_speed_max: Some(17.0),
         rotation_speed_min: Some(-17.0),
         scale_end: Some(1.0),
-        scale_max: Some(0.135),
-        scale_min: Some(0.05),
+        scale_max: Some(0.135 * NATIVE_CELEBRATION_SCALE),
+        scale_min: Some(0.05 * NATIVE_CELEBRATION_SCALE),
         spawn_rate: Some(0.0),
         speed_max: Some(3.4),
         speed_min: Some(1.5),
@@ -213,4 +217,20 @@ fn create_dust_config() -> ParticleEmitterConfig {
         world_space: Some(true),
         ..ParticleEmitterConfigOptions::default()
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NATIVE_CELEBRATION_SCALE, create_celebration_config, create_dust_config};
+
+    #[test]
+    fn scales_native_confetti_without_rescaling_impact_dust() {
+        let celebration = create_celebration_config();
+        assert_eq!(celebration.scale_min, 0.05 * NATIVE_CELEBRATION_SCALE);
+        assert_eq!(celebration.scale_max, 0.135 * NATIVE_CELEBRATION_SCALE);
+
+        let dust = create_dust_config();
+        assert_eq!(dust.scale_min, 0.008);
+        assert_eq!(dust.scale_max, 0.036);
+    }
 }
