@@ -3,7 +3,7 @@
 Horse Stacker is an end-to-end Flight showcase implemented twice:
 
 - `typescript-web/` is the complete browser game built with TypeScript and Flight's web host.
-- `rust-winit/` is its native Rust and winit counterpart, currently under construction.
+- `rust-winit/` is its native Rust and winit counterpart, mechanically translated module-for-module.
 
 Both applications use the canonical models and audio in `assets/`. Their implementations stay
 independent so each one remains an idiomatic, self-contained example of its Flight API.
@@ -36,14 +36,12 @@ zero-impulse physics activation, horse-height calibration, and farm-edge falloff
 
 ## Rust winit application
 
-The native application in `rust-winit/` opens a native GL window and renders the shared farm glTF
-through a Flight scene graph, with the web version's sky, lights, shadows, camera, and render-target
-setup. Its round core drives both modes, the timer and settling phases, queued-piece cadence,
-placement counts, and the different scoring rules. Its Flight physics world uses the web version's
-stack profiles, collider geometry, materials, stability assistance, contact tracking, and
-supported/settled-height rules. It now extracts the farm's hay, cow, and hen meshes, loads the horse
-model, and renders placed bodies through the same per-part Flight instancing design as the web game.
-Input aiming and the landing preview are the next visible porting slice.
+The native application in `rust-winit/` mirrors the browser game across the full source surface:
+scene construction and GL rendering, model extraction and instancing, free-plane aiming and the
+landing preview, Flight 2D physics, both game modes and result count-up, particles, audio
+orchestration, terrain sampling, windmill motion, records/preferences, and the five-screen Flight
+2D UI. Browser-only responsibilities have named winit/native substitutions rather than being
+omitted.
 
 The Rust modules deliberately mirror the TypeScript file and declaration names, translated to
 Rust's standard `snake_case`, so the two implementations can be read side-by-side as an API

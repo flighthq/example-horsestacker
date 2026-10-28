@@ -4,7 +4,7 @@ This is the native counterpart to `../typescript-web/`. It uses the same Flight 
 `flight-sdk`, while `winit` and `glutin` provide the native window and OpenGL context that a browser
 normally supplies.
 
-The current foundation:
+The source port now covers the complete TypeScript application mechanically:
 
 - opens a native window and owns its lifecycle through `winit`;
 - creates a `glow` context, Flight scene render state, and linear multisampled target;
@@ -14,15 +14,20 @@ The current foundation:
 - extracts hay, cow, and both hen variants from the farm's named mesh/material layers, loads the
   horse glTF, and batches placed copies with Flight instanced meshes;
 - resolves models and sounds from the repository's shared `../assets/` tree;
-- ports the round phase machine, both modes, queued-piece cadence and scoring rules;
+- ports the full round state and helpers: free-plane aiming, overlap resolution, physics stepping,
+  dropped-horse rules, records, result animation, both modes, queued-piece cadence and scoring;
 - ports the stack profiles and collider geometry from TypeScript; and
 - runs placed pieces through Flight's Rust 2D physics with the same materials, collision shapes,
-  stack assistance, contacts, pasture bounds, and supported/settled-height rules as the web game.
+  stack assistance, contacts, pasture bounds, and supported/settled-height rules as the web game;
+- translates the landing indicator, terrain sampler, windmill, dust and celebration particles,
+  play-plane unprojection, edge probe, reduced-motion preference, audio orchestration, and the full
+  five-screen Flight 2D UI; and
+- maps the browser shell onto winit cursor/keyboard events, borderless fullscreen, visibility and
+  context lifecycle, a native preference file, and the native GL surface.
 
-The window renders the real Flight farm and every placed stack object while exercising the round
-and physics rules with a deterministic piece sequence. Aimed placement and its landing preview,
-audio, and UI remain to be ported. The Rust source intentionally follows the TypeScript source
-file-for-file and declaration-for-declaration where a counterpart exists. Names only change to
+The mechanical pass was completed before compiling, so every TypeScript module and responsibility
+has a visible Rust destination. Compiler-driven API and ownership repairs follow that inventory;
+see `PARITY.md` for the explicit module ledger and native substitutions. Names only change to
 Rust's conventional `snake_case`; enums, explicit ownership, and `HorseStackWorld` provide the
 small amount of host-language adaptation needed by Flight's Rust API.
 
@@ -55,11 +60,10 @@ Use the current stable Rust toolchain. The Flight dependency is pinned to revisi
 cargo run --manifest-path rust-winit/Cargo.toml
 ```
 
-Press <kbd>Enter</kbd> to start Time Challenge or <kbd>S</kbd> to start Steady Hands. Press
-<kbd>Space</kbd> or left-click to place the current piece, <kbd>Backspace</kbd> to leave a round,
-and <kbd>Escape</kbd> to exit. The current and next piece, clock, placement count, and live stack
-height are shown in the window title. Until aimed placement lands, pieces enter above the current
-supported stack at the pasture's center.
+The title screen and result screen expose the same Flight 2D controls as the web app. During a
+round, move and click the pointer to aim and place, use the arrow keys to nudge in both axes, and
+press <kbd>Space</kbd> or <kbd>Enter</kbd> to place. <kbd>Escape</kbd> leaves Steady Hands or exits
+from the menus.
 
 ## Check
 
