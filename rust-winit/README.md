@@ -10,11 +10,13 @@ The current foundation:
 - creates a `glow` context and a Flight `GlRenderState`;
 - clears and presents the window through a Flight GL render pass;
 - resolves models and sounds from the repository's shared `../assets/` tree; and
-- ports the first pure game rules, stack profiles, and collider geometry from TypeScript.
+- ports the round phase machine, both modes, queued-piece cadence and scoring rules; and
+- ports the stack profiles and collider geometry from TypeScript.
 
-The scene, model loading, physics world, input, audio, and UI remain to be ported. The pure modules
-are intentionally organized like the TypeScript app, but use Rust enums and ownership instead of
-copying TypeScript shapes literally.
+The window currently exercises the round rules with a deterministic piece sequence. The scene,
+model loading, Flight physics world, aimed placement, audio, and UI remain to be ported. The pure
+modules are intentionally organized like the TypeScript app, but use Rust enums and ownership
+instead of copying TypeScript shapes literally.
 
 ## Run
 
@@ -25,11 +27,20 @@ Use the current stable Rust toolchain. The Flight dependency is pinned to revisi
 cargo run --manifest-path rust-winit/Cargo.toml
 ```
 
-Press <kbd>Escape</kbd> or close the window to exit.
+Press <kbd>Enter</kbd> to start Time Challenge or <kbd>S</kbd> to start Steady Hands. Press
+<kbd>Space</kbd> or left-click to place the current piece, <kbd>Backspace</kbd> to leave a round,
+and <kbd>Escape</kbd> to exit. Until the Flight physics/scene slice lands, the current and next
+piece, clock, and placement count are shown in the window title and the Flight clear colour marks
+the round phase.
 
 ## Check
 
 ```bash
 cargo fmt --manifest-path rust-winit/Cargo.toml --check
-cargo test --manifest-path rust-winit/Cargo.toml
+cargo test --manifest-path rust-winit/Cargo.toml --lib --no-default-features
+cargo check --manifest-path rust-winit/Cargo.toml --all-targets
 ```
+
+The lightweight test command deliberately omits the native feature so iteration on rules does not
+compile the GL/window stack. The default `native` feature enables Flight GL, Flight physics, winit,
+and glutin; `flight-physics` can also be enabled independently for future headless validation.

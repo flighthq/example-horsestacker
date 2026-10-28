@@ -36,9 +36,11 @@ zero-impulse physics activation, horse-height calibration, and farm-edge falloff
 
 ## Rust winit application
 
-The native application has begun in `rust-winit/`. Its first milestone opens a native GL window,
-creates a Flight render state, and clears the screen through a Flight render pass. The shared-asset
-resolver and the first pure game rules, stack profiles, and collider geometry are also in place.
+The native application has begun in `rust-winit/`. It opens a native GL window, creates a Flight
+render state, and presents through a Flight render pass. Its renderer-independent round core now
+drives both modes, the timer and settling phases, queued-piece cadence, placement counts, and the
+different scoring rules. The shared-asset resolver, stack profiles, and collider geometry are also
+in place.
 
 ```bash
 cargo run --manifest-path rust-winit/Cargo.toml

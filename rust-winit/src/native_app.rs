@@ -1,6 +1,7 @@
 use std::io;
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::time::Instant;
 
 use flight_sdk::{
     GlRenderState, GlScreenRenderTarget, RenderProxies2D, RenderTargetClear, begin_gl_render_pass,
@@ -15,16 +16,19 @@ use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{GlSurface, Surface, SwapInterval, WindowSurface};
 use glutin_winit::{DisplayBuilder, GlWindow};
+use horse_stacker_rust_winit::game::{GameMode, GamePhase, PlacementOutcome, RoundState};
+use horse_stacker_rust_winit::physics::{
+    StackObjectKind, stack_height_meters, stack_object_profile,
+};
 use raw_window_handle::HasWindowHandle;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 const WINDOW_TITLE: &str = "Horse Stacker — Flight Rust + winit";
-const CLEAR_COLOR: [f32; 4] = [0.055, 0.09, 0.045, 1.0];
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
@@ -62,6 +66,9 @@ struct HorseStackerApp {
     surface: Option<AppSurface>,
     context: Option<PossiblyCurrentContext>,
     exit_error: Option<String>,
+    round: RoundState,
+    pieces: PieceSequence,
+    clock: Instant,
 }
 
 impl HorseStackerApp {
@@ -73,7 +80,74 @@ impl HorseStackerApp {
             surface: None,
             context: None,
             exit_error: None,
+            round: RoundState::new(StackObjectKind::Horse),
+            pieces: PieceSequence::default(),
+            clock: Instant::now(),
         }
+    }
+
+    fn now_ms(&self) -> f64 {
+        self.clock.elapsed().as_secs_f64() * 1_000.0
+    }
+
+    fn start_round(&mut self, mode: GameMode) {
+        if !matches!(self.round.phase(), GamePhase::Ready | GamePhase::Finished) {
+            return;
+        }
+        let first = self.pieces.next();
+        let following = self.pieces.next();
+        self.round
+            .start_round(mode, self.now_ms(), first, following);
+    }
+
+    fn place(&mut self) {
+        let now = self.now_ms();
+        if let PlacementOutcome::Placed(kind) = self.round.place(now, now) {
+            println!("Placed {}", stack_object_profile(kind).label);
+        }
+    }
+
+    fn advance_round(&mut self) {
+        let now = self.now_ms();
+        let round = &mut self.round;
+        let pieces = &mut self.pieces;
+        // Physics will replace these zeroes with the supported and settled pile heights.
+        round.update(now, 0.0, 0.0, || pieces.next());
+    }
+
+    fn update_window_title(&self) {
+        let Some(surface) = &self.surface else {
+            return;
+        };
+        let title = match self.round.phase() {
+            GamePhase::Loading => format!("{WINDOW_TITLE} — loading"),
+            GamePhase::Ready => {
+                format!("{WINDOW_TITLE} — Enter: Time Challenge · S: Steady Hands")
+            }
+            GamePhase::Playing => {
+                let mode = mode_label(self.round.mode());
+                let clock = match self.round.mode() {
+                    GameMode::Time => format!("{:.1}s", self.round.seconds_left_at(self.now_ms())),
+                    GameMode::Steady => "no clock".to_owned(),
+                };
+                let active = self
+                    .round
+                    .active_kind()
+                    .map(|kind| stack_object_profile(kind).label)
+                    .unwrap_or("waiting");
+                let next = stack_object_profile(self.round.next_kind()).label;
+                format!(
+                    "{WINDOW_TITLE} — {mode} · {clock} · {} placed · Space drops {active} · next {next}",
+                    self.round.objects_dropped()
+                )
+            }
+            GamePhase::Settling => format!("{WINDOW_TITLE} — settling the pile…"),
+            GamePhase::Finished => format!(
+                "{WINDOW_TITLE} — {:.2} m · Enter: Time · S: Steady",
+                stack_height_meters(self.round.final_height())
+            ),
+        };
+        surface.window.set_title(&title);
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl Into<String>) {
@@ -97,7 +171,7 @@ impl HorseStackerApp {
             .as_ref()
             .ok_or_else(|| "redraw requested without a GL context".to_owned())?;
 
-        renderer.draw()?;
+        renderer.draw(phase_clear_color(self.round.phase()))?;
         surface.window.pre_present_notify();
         surface
             .gl_surface
@@ -202,6 +276,10 @@ impl ApplicationHandler for HorseStackerApp {
             renderer.resize(size.width.max(1), size.height.max(1));
         }
 
+        if self.round.phase() == GamePhase::Loading {
+            self.round.mark_ready();
+        }
+
         self.surface = Some(AppSurface { gl_surface, window });
         if let Some(surface) = &self.surface {
             surface.window.request_redraw();
@@ -227,16 +305,31 @@ impl ApplicationHandler for HorseStackerApp {
         event: WindowEvent,
     ) {
         match event {
-            WindowEvent::CloseRequested
-            | WindowEvent::KeyboardInput {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        logical_key: Key::Named(NamedKey::Escape),
+                        logical_key,
                         state: ElementState::Pressed,
+                        repeat: false,
                         ..
                     },
                 ..
-            } => event_loop.exit(),
+            } => match logical_key.as_ref() {
+                Key::Named(NamedKey::Escape) => event_loop.exit(),
+                Key::Named(NamedKey::Enter) => self.start_round(GameMode::Time),
+                Key::Character(value) if value.eq_ignore_ascii_case("s") => {
+                    self.start_round(GameMode::Steady);
+                }
+                Key::Character(value) if value == " " => self.place(),
+                Key::Named(NamedKey::Backspace) => self.round.leave_round(),
+                _ => {}
+            },
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => self.place(),
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 if let (Some(surface), Some(context)) = (&self.surface, &self.context) {
                     surface.gl_surface.resize(
@@ -262,6 +355,8 @@ impl ApplicationHandler for HorseStackerApp {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.advance_round();
+        self.update_window_title();
         if let Some(surface) = &self.surface {
             surface.window.request_redraw();
         }
@@ -302,15 +397,67 @@ impl FlightRenderer {
         self.screen.height = height;
     }
 
-    fn draw(&self) -> Result<(), String> {
+    fn draw(&self, clear_color: [f32; 4]) -> Result<(), String> {
         let clear = RenderTargetClear {
-            color: Some(CLEAR_COLOR),
+            color: Some(clear_color),
             depth: Some(1.0),
             stencil: Some(0),
             ..RenderTargetClear::default()
         };
         let pass = begin_gl_render_pass(&self.state, &self.screen, Some(&clear), None)?;
         end_gl_render_pass(&self.state, &pass)
+    }
+}
+
+#[derive(Default)]
+struct PieceSequence {
+    cursor: usize,
+}
+
+impl PieceSequence {
+    fn next(&mut self) -> StackObjectKind {
+        const PIECES: [StackObjectKind; 20] = [
+            StackObjectKind::Horse,
+            StackObjectKind::Hay,
+            StackObjectKind::Hay,
+            StackObjectKind::Chickens,
+            StackObjectKind::Hay,
+            StackObjectKind::Cow,
+            StackObjectKind::Horse,
+            StackObjectKind::Hay,
+            StackObjectKind::Chickens,
+            StackObjectKind::Hay,
+            StackObjectKind::Horse,
+            StackObjectKind::Hay,
+            StackObjectKind::Hay,
+            StackObjectKind::Chickens,
+            StackObjectKind::Cow,
+            StackObjectKind::Hay,
+            StackObjectKind::Horse,
+            StackObjectKind::Hay,
+            StackObjectKind::Chickens,
+            StackObjectKind::Hay,
+        ];
+        let kind = PIECES[self.cursor % PIECES.len()];
+        self.cursor += 1;
+        kind
+    }
+}
+
+const fn mode_label(mode: GameMode) -> &'static str {
+    match mode {
+        GameMode::Time => "Time Challenge",
+        GameMode::Steady => "Steady Hands",
+    }
+}
+
+const fn phase_clear_color(phase: GamePhase) -> [f32; 4] {
+    match phase {
+        GamePhase::Loading => [0.025, 0.03, 0.025, 1.0],
+        GamePhase::Ready => [0.055, 0.09, 0.045, 1.0],
+        GamePhase::Playing => [0.04, 0.105, 0.095, 1.0],
+        GamePhase::Settling => [0.16, 0.095, 0.035, 1.0],
+        GamePhase::Finished => [0.105, 0.055, 0.12, 1.0],
     }
 }
 
