@@ -1,12 +1,12 @@
 use super::{
     HORSE_HALF_HEIGHT, HORSE_HALF_WIDTH, HORSE_SUPPORT_HALF_HEIGHT, StackObjectKind,
-    stack_object_profile,
+    get_stack_object_profile,
 };
 
 /// Return area-centred convex collider polygons, or `None` for the circular chickens body.
-pub fn centred_collider_polygons(kind: StackObjectKind) -> Option<Vec<Vec<f64>>> {
-    let polygons = raw_collider_polygons(kind)?;
-    let [centroid_x, centroid_y] = collider_centroid(&polygons);
+pub fn get_centred_collider_polygons(kind: StackObjectKind) -> Option<Vec<Vec<f64>>> {
+    let polygons = get_raw_collider_polygons(kind)?;
+    let [centroid_x, centroid_y] = get_collider_centroid(&polygons);
     Some(
         polygons
             .into_iter()
@@ -28,11 +28,11 @@ pub fn centred_collider_polygons(kind: StackObjectKind) -> Option<Vec<Vec<f64>>>
     )
 }
 
-pub fn collider_centroid_offset_y(kind: StackObjectKind) -> Option<f64> {
-    raw_collider_polygons(kind).map(|polygons| -collider_centroid(&polygons)[1])
+pub fn get_collider_centroid_offset_y(kind: StackObjectKind) -> Option<f64> {
+    get_raw_collider_polygons(kind).map(|polygons| -get_collider_centroid(&polygons)[1])
 }
 
-pub fn polygon_area_centroid(points: &[f64]) -> [f64; 3] {
+pub fn get_polygon_area_centroid(points: &[f64]) -> [f64; 3] {
     let mut twice_area = 0.0;
     let mut centroid_x = 0.0;
     let mut centroid_y = 0.0;
@@ -56,22 +56,22 @@ pub fn polygon_area_centroid(points: &[f64]) -> [f64; 3] {
     [twice_area / 2.0, centroid_x * scale, centroid_y * scale]
 }
 
-pub fn horse_collider_polygons() -> Vec<Vec<f64>> {
+pub fn get_horse_collider_polygons() -> Vec<Vec<f64>> {
     let width = HORSE_HALF_WIDTH;
     let height = HORSE_HALF_HEIGHT;
     let back_y = HORSE_SUPPORT_HALF_HEIGHT;
     vec![
-        box_points(-0.667 * width, -height, 0.926 * width, back_y),
-        box_points(-0.944 * width, back_y, -0.278 * width, height),
+        get_box_points(-0.667 * width, -height, 0.926 * width, back_y),
+        get_box_points(-0.944 * width, back_y, -0.278 * width, height),
     ]
 }
 
-pub fn box_points(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Vec<f64> {
+pub fn get_box_points(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Vec<f64> {
     vec![min_x, min_y, max_x, min_y, max_x, max_y, min_x, max_y]
 }
 
-pub fn polygon_collider_points(kind: StackObjectKind) -> Option<Vec<f64>> {
-    let profile = stack_object_profile(kind);
+pub fn get_polygon_collider_points(kind: StackObjectKind) -> Option<Vec<f64>> {
+    let profile = get_stack_object_profile(kind);
     let height = profile.half_height;
     let width = profile.half_width;
     match kind {
@@ -93,7 +93,7 @@ pub fn polygon_collider_points(kind: StackObjectKind) -> Option<Vec<f64>> {
             -width,
             height * 0.235,
         ]),
-        StackObjectKind::Hay => Some(box_points(-width, -height, width, height)),
+        StackObjectKind::Hay => Some(get_box_points(-width, -height, width, height)),
         StackObjectKind::Cow => Some(vec![
             -width,
             -height * 0.65,
@@ -112,20 +112,20 @@ pub fn polygon_collider_points(kind: StackObjectKind) -> Option<Vec<f64>> {
     }
 }
 
-fn raw_collider_polygons(kind: StackObjectKind) -> Option<Vec<Vec<f64>>> {
+fn get_raw_collider_polygons(kind: StackObjectKind) -> Option<Vec<Vec<f64>>> {
     if kind == StackObjectKind::Horse {
-        return Some(horse_collider_polygons());
+        return Some(get_horse_collider_polygons());
     }
-    polygon_collider_points(kind).map(|points| vec![points])
+    get_polygon_collider_points(kind).map(|points| vec![points])
 }
 
-fn collider_centroid(polygons: &[Vec<f64>]) -> [f64; 2] {
+fn get_collider_centroid(polygons: &[Vec<f64>]) -> [f64; 2] {
     let mut total_area = 0.0;
     let mut centroid_x = 0.0;
     let mut centroid_y = 0.0;
 
     for points in polygons {
-        let [area, x, y] = polygon_area_centroid(points);
+        let [area, x, y] = get_polygon_area_centroid(points);
         total_area += area;
         centroid_x += area * x;
         centroid_y += area * y;
@@ -139,12 +139,12 @@ fn collider_centroid(polygons: &[Vec<f64>]) -> [f64; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::{centred_collider_polygons, polygon_area_centroid};
+    use super::{get_centred_collider_polygons, get_polygon_area_centroid};
     use crate::physics::StackObjectKind;
 
     #[test]
     fn rectangle_centroid_is_its_geometric_middle() {
-        let [area, x, y] = polygon_area_centroid(&[0.0, 0.0, 4.0, 0.0, 4.0, 2.0, 0.0, 2.0]);
+        let [area, x, y] = get_polygon_area_centroid(&[0.0, 0.0, 4.0, 0.0, 4.0, 2.0, 0.0, 2.0]);
         assert_eq!(area, 8.0);
         assert!((x - 2.0).abs() < 1e-12);
         assert!((y - 1.0).abs() < 1e-12);
@@ -152,12 +152,12 @@ mod tests {
 
     #[test]
     fn centred_horse_compound_has_zero_area_centroid() {
-        let polygons = centred_collider_polygons(StackObjectKind::Horse).unwrap();
+        let polygons = get_centred_collider_polygons(StackObjectKind::Horse).unwrap();
         let mut total_area = 0.0;
         let mut weighted_x = 0.0;
         let mut weighted_y = 0.0;
         for polygon in polygons {
-            let [area, x, y] = polygon_area_centroid(&polygon);
+            let [area, x, y] = get_polygon_area_centroid(&polygon);
             total_area += area;
             weighted_x += area * x;
             weighted_y += area * y;
@@ -168,6 +168,6 @@ mod tests {
 
     #[test]
     fn chickens_keep_their_circle_collider() {
-        assert!(centred_collider_polygons(StackObjectKind::Chickens).is_none());
+        assert!(get_centred_collider_polygons(StackObjectKind::Chickens).is_none());
     }
 }

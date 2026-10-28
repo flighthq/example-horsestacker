@@ -6,66 +6,60 @@ pub enum StackObjectKind {
     Chickens,
 }
 
-impl StackObjectKind {
-    pub const ALL: [Self; 4] = [Self::Horse, Self::Hay, Self::Cow, Self::Chickens];
+pub const STACK_OBJECT_KINDS: [StackObjectKind; 4] = [
+    StackObjectKind::Horse,
+    StackObjectKind::Hay,
+    StackObjectKind::Cow,
+    StackObjectKind::Chickens,
+];
+pub const STACK_OBJECT_WEIGHTS: [f64; 4] = [0.30, 0.50, 0.05, 0.15];
 
-    pub const fn weight(self) -> f64 {
-        match self {
-            Self::Horse => 0.30,
-            Self::Hay => 0.50,
-            Self::Cow => 0.05,
-            Self::Chickens => 0.15,
+/// Selects a kind from a unit random draw, mirroring `getRandomStackObjectKind(random)`.
+pub fn get_random_stack_object_kind(draw: f64) -> StackObjectKind {
+    let total_weight: f64 = STACK_OBJECT_WEIGHTS.iter().sum();
+    let mut remaining = draw.clamp(0.0, 1.0 - f64::EPSILON) * total_weight;
+
+    for (kind, weight) in STACK_OBJECT_KINDS.into_iter().zip(STACK_OBJECT_WEIGHTS) {
+        if remaining < weight {
+            return kind;
         }
+        remaining -= weight;
     }
 
-    /// Select a kind from a random draw in the same way as the TypeScript implementation.
-    pub fn from_unit_draw(draw: f64) -> Self {
-        let total_weight: f64 = Self::ALL.into_iter().map(Self::weight).sum();
-        let mut remaining = draw.clamp(0.0, 1.0 - f64::EPSILON) * total_weight;
-
-        for kind in Self::ALL {
-            if remaining < kind.weight() {
-                return kind;
-            }
-            remaining -= kind.weight();
-        }
-
-        Self::Hay
-    }
+    StackObjectKind::Hay
 }
 
-pub fn next_object_delay_ms(objects_dropped: u32) -> f64 {
+pub fn get_next_object_delay(objects_dropped: u32) -> f64 {
     (210.0 - f64::from(objects_dropped) * 3.25).max(80.0)
 }
 
-pub fn pace_level(objects_dropped: u32) -> u32 {
+pub fn get_pace_level(objects_dropped: u32) -> u32 {
     (1 + objects_dropped / 7).min(6)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{StackObjectKind, next_object_delay_ms, pace_level};
+    use super::{
+        StackObjectKind, get_next_object_delay, get_pace_level, get_random_stack_object_kind,
+    };
 
     #[test]
     fn weighted_boundaries_match_the_typescript_order() {
-        assert_eq!(StackObjectKind::from_unit_draw(0.0), StackObjectKind::Horse);
-        assert_eq!(StackObjectKind::from_unit_draw(0.30), StackObjectKind::Hay);
-        assert_eq!(StackObjectKind::from_unit_draw(0.80), StackObjectKind::Cow);
+        assert_eq!(get_random_stack_object_kind(0.0), StackObjectKind::Horse);
+        assert_eq!(get_random_stack_object_kind(0.30), StackObjectKind::Hay);
+        assert_eq!(get_random_stack_object_kind(0.80), StackObjectKind::Cow);
         assert_eq!(
-            StackObjectKind::from_unit_draw(0.85),
+            get_random_stack_object_kind(0.85),
             StackObjectKind::Chickens
         );
-        assert_eq!(
-            StackObjectKind::from_unit_draw(1.0),
-            StackObjectKind::Chickens
-        );
+        assert_eq!(get_random_stack_object_kind(1.0), StackObjectKind::Chickens);
     }
 
     #[test]
     fn pace_and_delay_are_bounded() {
-        assert_eq!(pace_level(0), 1);
-        assert_eq!(pace_level(10_000), 6);
-        assert_eq!(next_object_delay_ms(0), 210.0);
-        assert_eq!(next_object_delay_ms(10_000), 80.0);
+        assert_eq!(get_pace_level(0), 1);
+        assert_eq!(get_pace_level(10_000), 6);
+        assert_eq!(get_next_object_delay(0), 210.0);
+        assert_eq!(get_next_object_delay(10_000), 80.0);
     }
 }
