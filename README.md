@@ -36,11 +36,13 @@ zero-impulse physics activation, horse-height calibration, and farm-edge falloff
 
 ## Rust winit application
 
-The native application has begun in `rust-winit/`. It opens a native GL window, creates a Flight
-render state, and presents through a Flight render pass. Its round core drives both modes, the timer
-and settling phases, queued-piece cadence, placement counts, and the different scoring rules. Its
-Flight physics world now uses the web version's stack profiles, collider geometry, materials,
-stability assistance, contact tracking, and supported/settled-height rules.
+The native application in `rust-winit/` opens a native GL window and renders the shared farm glTF
+through a Flight scene graph, with the web version's sky, lights, shadows, camera, and render-target
+setup. Its round core drives both modes, the timer and settling phases, queued-piece cadence,
+placement counts, and the different scoring rules. Its Flight physics world uses the web version's
+stack profiles, collider geometry, materials, stability assistance, contact tracking, and
+supported/settled-height rules. Stack-object scene visuals and input aiming are the next visible
+porting slice.
 
 The Rust modules deliberately mirror the TypeScript file and declaration names, translated to
 Rust's standard `snake_case`, so the two implementations can be read side-by-side as an API

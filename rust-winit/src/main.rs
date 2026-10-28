@@ -3,11 +3,7 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::Instant;
 
-use flight_sdk::{
-    GlRenderState, GlScreenRenderTarget, Ref, RenderProxies2D, RenderTargetClear, RigidBody2D,
-    begin_gl_render_pass, create_gl_context_state, create_gl_render_state,
-    create_gl_screen_render_target, destroy_gl_render_state, end_gl_render_pass,
-};
+use flight_sdk::{Projection, Ref, RigidBody2D};
 use glutin::config::{Config, ConfigTemplateBuilder, GetGlConfig};
 use glutin::context::{
     ContextApi, ContextAttributesBuilder, NotCurrentContext, PossiblyCurrentContext, Version,
@@ -16,6 +12,7 @@ use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{GlSurface, Surface, SwapInterval, WindowSurface};
 use glutin_winit::{DisplayBuilder, GlWindow};
+use horse_stacker_rust_winit::assets::asset_path;
 use horse_stacker_rust_winit::game::{
     FIXED_STEP_LIMIT, Game, GameMode, GamePhase, HORSE_DROP_ELAPSED_MS, HORSE_REST_ANGULAR,
     HORSE_REST_LINEAR, HORSE_REST_SECONDS, PlacementOutcome, StackedObject, create_game,
@@ -26,6 +23,10 @@ use horse_stacker_rust_winit::physics::{
     create_horse_stack_world, get_settled_stack_height, get_stack_body_contacts,
     get_stack_height_meters, get_stack_object_profile, get_stack_object_vertical_extent,
     get_supported_stack_height, remove_stack_object_body, step_horse_stack,
+};
+use horse_stacker_rust_winit::scene::{
+    CameraRig, SceneGraph, SceneRenderer, create_camera_rig, create_scene_graph,
+    create_scene_renderer, load_gltf_scene, mount_farm,
 };
 use raw_window_handle::HasWindowHandle;
 use winit::application::ApplicationHandler;
@@ -44,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_depth_size(24)
         .with_stencil_size(8);
     let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes()));
-    let mut app = HorseStackerApp::new(template, display_builder);
+    let mut app = HorseStackerApp::new(template, display_builder).map_err(io::Error::other)?;
 
     event_loop.run_app(&mut app)?;
 
@@ -69,7 +70,7 @@ enum GlDisplayCreationState {
 struct HorseStackerApp {
     template: ConfigTemplateBuilder,
     display: GlDisplayCreationState,
-    renderer: Option<FlightRenderer>,
+    renderer: Option<SceneRenderer>,
     surface: Option<AppSurface>,
     context: Option<PossiblyCurrentContext>,
     exit_error: Option<String>,
@@ -80,11 +81,22 @@ struct HorseStackerApp {
     physics_accumulator: f64,
     physics_world: HorseStackWorld,
     stacked_objects: Vec<StackedObject>,
+    scene_graph: SceneGraph,
+    camera_rig: CameraRig,
 }
 
 impl HorseStackerApp {
-    fn new(template: ConfigTemplateBuilder, display_builder: DisplayBuilder) -> Self {
-        Self {
+    fn new(
+        template: ConfigTemplateBuilder,
+        display_builder: DisplayBuilder,
+    ) -> Result<Self, String> {
+        let mut scene_graph = create_scene_graph();
+        let farm = load_gltf_scene(asset_path("models/farm"))?;
+        mount_farm(&farm, &scene_graph.root);
+        let mut camera_rig = create_camera_rig();
+        camera_rig.update(&mut scene_graph.camera, 1.0, 0.0, 0);
+
+        Ok(Self {
             template,
             display: GlDisplayCreationState::Builder(Box::new(display_builder)),
             renderer: None,
@@ -98,7 +110,9 @@ impl HorseStackerApp {
             physics_accumulator: 0.0,
             physics_world: create_horse_stack_world(None),
             stacked_objects: Vec::new(),
-        }
+            scene_graph,
+            camera_rig,
+        })
     }
 
     fn now_ms(&self) -> f64 {
@@ -117,6 +131,7 @@ impl HorseStackerApp {
             self.stacked_objects.clear();
             self.physics_accumulator = 0.0;
             self.last_update_ms = now;
+            self.camera_rig.reset_height();
         }
     }
 
@@ -158,6 +173,12 @@ impl HorseStackerApp {
         let game = &mut self.game;
         let pieces = &mut self.pieces;
         game.update(now, current_height, settled_height, || pieces.next());
+        self.camera_rig.update(
+            &mut self.scene_graph.camera,
+            delta_time as f32,
+            self.game.displayed_height() as f32,
+            self.game.objects_dropped(),
+        );
     }
 
     fn leave_round(&mut self) {
@@ -165,6 +186,7 @@ impl HorseStackerApp {
         self.physics_world = create_horse_stack_world(None);
         self.stacked_objects.clear();
         self.physics_accumulator = 0.0;
+        self.camera_rig.reset_height();
     }
 
     fn stack_bodies(&self) -> Vec<Ref<RigidBody2D>> {
@@ -283,7 +305,7 @@ impl HorseStackerApp {
     fn redraw(&mut self) -> Result<(), String> {
         let renderer = self
             .renderer
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| "redraw requested before the Flight renderer was ready".to_owned())?;
         let surface = self
             .surface
@@ -294,7 +316,7 @@ impl HorseStackerApp {
             .as_ref()
             .ok_or_else(|| "redraw requested without a GL context".to_owned())?;
 
-        renderer.draw(phase_clear_color(self.game.phase()))?;
+        renderer.draw_scene(&self.scene_graph);
         surface.window.pre_present_notify();
         surface
             .gl_surface
@@ -388,16 +410,24 @@ impl ApplicationHandler for HorseStackerApp {
 
         let size = window.inner_size();
         if self.renderer.is_none() {
-            match FlightRenderer::new(&gl_config.display(), size.width.max(1), size.height.max(1)) {
+            match create_native_scene_renderer(
+                &gl_config.display(),
+                size.width.max(1),
+                size.height.max(1),
+            ) {
                 Ok(renderer) => self.renderer = Some(renderer),
                 Err(error) => {
                     self.fail(event_loop, error);
                     return;
                 }
             }
-        } else if let Some(renderer) = self.renderer.as_mut() {
-            renderer.resize(size.width.max(1), size.height.max(1));
+        } else if let Some(renderer) = self.renderer.as_mut()
+            && let Err(error) = renderer.resize(size.width.max(1), size.height.max(1))
+        {
+            self.fail(event_loop, error);
+            return;
         }
+        set_camera_aspect(&mut self.scene_graph, size.width.max(1), size.height.max(1));
 
         if self.game.phase() == GamePhase::Loading {
             self.game.mark_ready();
@@ -461,9 +491,13 @@ impl ApplicationHandler for HorseStackerApp {
                         NonZeroU32::new(size.height).expect("positive height"),
                     );
                 }
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.resize(size.width, size.height);
+                if let Some(renderer) = self.renderer.as_mut()
+                    && let Err(error) = renderer.resize(size.width, size.height)
+                {
+                    self.fail(event_loop, error);
+                    return;
                 }
+                set_camera_aspect(&mut self.scene_graph, size.width, size.height);
                 if let Some(surface) = &self.surface {
                     surface.window.request_redraw();
                 }
@@ -499,36 +533,20 @@ struct AppSurface {
     window: Window,
 }
 
-struct FlightRenderer {
-    state: GlRenderState,
-    screen: GlScreenRenderTarget,
+fn create_native_scene_renderer<D: GlDisplay>(
+    display: &D,
+    width: u32,
+    height: u32,
+) -> Result<SceneRenderer, String> {
+    let gl = Rc::new(unsafe {
+        glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol))
+    });
+    create_scene_renderer(gl, width, height)
 }
 
-impl FlightRenderer {
-    fn new<D: GlDisplay>(display: &D, width: u32, height: u32) -> Result<Self, String> {
-        let gl = Rc::new(unsafe {
-            glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol))
-        });
-        let context_state = create_gl_context_state(Rc::clone(&gl))?;
-        let state = create_gl_render_state(context_state, None);
-        let screen = create_gl_screen_render_target(gl, width, height);
-        Ok(Self { state, screen })
-    }
-
-    fn resize(&mut self, width: u32, height: u32) {
-        self.screen.width = width;
-        self.screen.height = height;
-    }
-
-    fn draw(&self, clear_color: [f32; 4]) -> Result<(), String> {
-        let clear = RenderTargetClear {
-            color: Some(clear_color),
-            depth: Some(1.0),
-            stencil: Some(0),
-            ..RenderTargetClear::default()
-        };
-        let pass = begin_gl_render_pass(&self.state, &self.screen, Some(&clear), None)?;
-        end_gl_render_pass(&self.state, &pass)
+fn set_camera_aspect(scene_graph: &mut SceneGraph, width: u32, height: u32) {
+    if let Projection::Perspective(projection) = &scene_graph.camera.projection {
+        projection.write().unwrap().aspect = width as f32 / height as f32;
     }
 }
 
@@ -571,23 +589,6 @@ const fn mode_label(mode: GameMode) -> &'static str {
     match mode {
         GameMode::Time => "Time Challenge",
         GameMode::Steady => "Steady Hands",
-    }
-}
-
-const fn phase_clear_color(phase: GamePhase) -> [f32; 4] {
-    match phase {
-        GamePhase::Loading => [0.025, 0.03, 0.025, 1.0],
-        GamePhase::Ready => [0.055, 0.09, 0.045, 1.0],
-        GamePhase::Playing => [0.04, 0.105, 0.095, 1.0],
-        GamePhase::Settling => [0.16, 0.095, 0.035, 1.0],
-        GamePhase::Finished => [0.105, 0.055, 0.12, 1.0],
-    }
-}
-
-impl Drop for FlightRenderer {
-    fn drop(&mut self) {
-        let mut proxies = RenderProxies2D::<GlRenderState>::default();
-        destroy_gl_render_state(&mut self.state, &mut proxies);
     }
 }
 
