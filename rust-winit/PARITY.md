@@ -7,7 +7,7 @@ counterpart. Browser host operations are translated to the native substitution n
 are not silently omitted.
 
 Every row below passed that source inventory on 2026-10-27. The complete native target now passes
-`cargo check --all-targets`, `cargo build --all-targets`, and its 23 library tests. The lightweight
+`cargo check --all-targets`, `cargo build --all-targets`, and its 25 library tests. The lightweight
 no-feature lane passes 10 tests and the headless `flight-physics` lane passes 20 tests.
 
 | TypeScript source | Rust counterpart | Translation status | Native substitution |
@@ -43,6 +43,6 @@ no-feature lane passes 10 tests and the headless `flight-physics` lane passes 20
 
 Host-only `styles.css` becomes native window/Flight-2D presentation and therefore has no literal
 Rust file. `vite-env.d.ts` only augments the TypeScript build and has no runtime counterpart.
-`native_gl.rs` is native host glue: it normalizes the leading GLSL version directive at the
-`glShaderSource` boundary so Flight's shared WebGL-authored shaders work with either desktop
-OpenGL 3.3 or glutin's OpenGL ES 3 fallback.
+`native_gl.rs` is native host glue: it normalizes GLSL versions, ES precision declarations, and
+versionless WebGL 1 keywords at the `glShaderSource` boundary so Flight's shared shaders work with
+either desktop OpenGL 3.3 or glutin's OpenGL ES 3 fallback.
