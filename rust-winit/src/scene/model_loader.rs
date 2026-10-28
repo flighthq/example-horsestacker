@@ -281,6 +281,13 @@ mod tests {
     use super::{extract_farm_prop_templates, load_gltf_scene, mount_farm};
     use crate::assets::asset_path;
     use crate::data::FARM_PROP_VARIANTS;
+    #[cfg(feature = "native")]
+    use crate::scene::{create_camera_rig, create_scene_graph};
+    #[cfg(feature = "native")]
+    use flight_sdk::{
+        GlMaterialRenderer, STANDARD_MATERIAL_KIND, create_render_state, gl_scene3d_render_preset,
+        prepare_scene_3d_render,
+    };
     use flight_sdk::{
         IndexBuffer, Node3DFields, NodeRef, as_node3d_ref, create_node3d, get_node_children,
         publish_node3d,
@@ -300,6 +307,66 @@ mod tests {
         let mut mounted = Vec::new();
         get_node_children(&mut mounted, &root);
         assert_eq!(mounted.len(), 1);
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn mounted_farm_and_sky_are_visible_to_the_initial_camera() {
+        let farm = load_gltf_scene(asset_path("models/farm")).unwrap();
+        let mut scene = create_scene_graph();
+        mount_farm(&farm, &scene.root);
+        let mut camera_rig = create_camera_rig();
+        camera_rig.update(&mut scene.camera, 1.0, 0.0, 0);
+
+        let mut state = create_render_state();
+        let prepared = prepare_scene_3d_render(
+            &mut state,
+            &scene.root,
+            &scene.camera,
+            &scene.lights,
+            Some(16.0 / 9.0),
+        );
+        assert!(
+            prepared.mesh_count > 1,
+            "initial camera should see the sky plus farm meshes"
+        );
+        let subset_count = prepared.visible_meshes[..prepared.mesh_count]
+            .iter()
+            .map(|node| {
+                as_node3d_ref(node).map_or(0, |node| {
+                    let node = node.read().unwrap();
+                    node.as_mesh()
+                        .map_or(0, |mesh| mesh.geometry.read().unwrap().subsets.len())
+                })
+            })
+            .sum::<usize>();
+        assert!(
+            subset_count > 1,
+            "visible meshes must contain drawable subsets"
+        );
+        let preset = gl_scene3d_render_preset();
+        for node in &prepared.visible_meshes[..prepared.mesh_count] {
+            let Some(node) = as_node3d_ref(node) else {
+                continue;
+            };
+            let node = node.read().unwrap();
+            let Some(mesh) = node.as_mesh() else {
+                continue;
+            };
+            for material in mesh.materials.read().unwrap().iter() {
+                let kind = material.as_ref().map_or_else(
+                    || STANDARD_MATERIAL_KIND.to_owned(),
+                    |material| material.read().unwrap().material_fields().kind.clone(),
+                );
+                assert!(
+                    matches!(
+                        preset.gl_registries.material_renderers.entries.get(&kind),
+                        Some(GlMaterialRenderer::Mesh(_))
+                    ),
+                    "visible material kind {kind} must have a 3D GL renderer"
+                );
+            }
+        }
     }
 
     #[test]

@@ -3,12 +3,13 @@
 use std::rc::Rc;
 
 use flight_sdk::{
-    GlRenderState, GlTextureRenderTarget, RenderProxies2D, RenderTargetColorSpace,
-    RenderTargetDepth, RenderTargetDescriptor, RenderTargetFormat, add_node_child_at,
-    create_gl_context_state, create_gl_render_state, create_gl_texture_render_target,
-    destroy_gl_render_state, destroy_gl_texture_render_target, get_node_parent,
-    gl_scene3d_render_preset, present_gl_scene3d, remove_node_child, render_gl_scene3d_shadow_map,
-    resize_gl_texture_render_target,
+    GlRenderState, GlTextureRenderTarget, RenderProxies2D, RenderTargetClear,
+    RenderTargetColorSpace, RenderTargetDepth, RenderTargetDescriptor, RenderTargetFormat,
+    add_node_child_at, begin_gl_render_pass, create_gl_context_state, create_gl_render_state,
+    create_gl_texture_render_target, destroy_gl_render_state, destroy_gl_texture_render_target,
+    end_gl_render_pass, get_node_parent, gl_scene3d_render_preset, present_gl_render_target,
+    remove_node_child, render_gl_scene3d, render_gl_scene3d_shadow_map,
+    resize_gl_texture_render_target, resolve_gl_texture_render_target,
 };
 use glow::HasContext;
 
@@ -102,13 +103,35 @@ impl SceneRenderer {
         if let Some(parent) = &sky_parent {
             add_node_child_at(parent, &sky_node, 0);
         }
-        present_gl_scene3d(
+        let pass = begin_gl_render_pass(
+            &self.render_state,
+            &self.target,
+            Some(&RenderTargetClear {
+                color: Some([0.0, 0.0, 0.0, 0.0]),
+                depth: Some(1.0),
+                stencil: Some(0),
+                ..RenderTargetClear::default()
+            }),
+            None,
+        )
+        .unwrap_or_else(|error| flight_sdk::throw_error(&error));
+        render_gl_scene3d(
             &mut self.render_state,
-            &mut self.target,
+            &pass,
+            Some(&mut self.target),
             &scene_graph.root,
             &scene_graph.camera,
             &scene_graph.lights,
+            None,
         );
+        end_gl_render_pass(&self.render_state, &pass)
+            .unwrap_or_else(|error| flight_sdk::throw_error(&error));
+        // At the pinned Flight revision, end_gl_render_pass's snapshot resolve does not populate a
+        // multisampled target on native desktop GL. Resolve the concrete target before its texture
+        // is sampled by the presentation pass. The call is a no-op for a single-sample fallback.
+        resolve_gl_texture_render_target(&self.render_state, &self.target);
+        present_gl_render_target(&mut self.render_state, &self.target, None)
+            .unwrap_or_else(|error| flight_sdk::throw_error(&error));
     }
 
     pub fn bind_native_vertex_array(&self) {
