@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::Instant;
 
-use flight_sdk::{Projection, Ref, RigidBody2D};
+use flight_sdk::{Projection, Ref, RigidBody2D, add_node_child, remove_node_children};
 use glutin::config::{Config, ConfigTemplateBuilder, GetGlConfig};
 use glutin::context::{
     ContextApi, ContextAttributesBuilder, NotCurrentContext, PossiblyCurrentContext, Version,
@@ -15,7 +15,8 @@ use glutin_winit::{DisplayBuilder, GlWindow};
 use horse_stacker_rust_winit::assets::asset_path;
 use horse_stacker_rust_winit::game::{
     FIXED_STEP_LIMIT, Game, GameMode, GamePhase, HORSE_DROP_ELAPSED_MS, HORSE_REST_ANGULAR,
-    HORSE_REST_LINEAR, HORSE_REST_SECONDS, PlacementOutcome, StackedObject, create_game,
+    HORSE_REST_LINEAR, HORSE_REST_SECONDS, PlacementOutcome, StackObjectSelection, StackedObject,
+    create_game,
 };
 use horse_stacker_rust_winit::physics::{
     HorseStackWorld, PASTURE_MAX_X, PASTURE_MIN_X, PASTURE_TOP_Y, PHYSICS_STEP,
@@ -25,8 +26,9 @@ use horse_stacker_rust_winit::physics::{
     get_supported_stack_height, remove_stack_object_body, step_horse_stack,
 };
 use horse_stacker_rust_winit::scene::{
-    CameraRig, SceneGraph, SceneRenderer, create_camera_rig, create_scene_graph,
-    create_scene_renderer, load_gltf_scene, mount_farm,
+    CameraRig, SceneGraph, SceneRenderer, StackObjectVisuals, create_camera_rig,
+    create_scene_graph, create_scene_renderer, create_stack_object_visuals,
+    extract_farm_prop_templates, load_gltf_scene, mount_farm,
 };
 use raw_window_handle::HasWindowHandle;
 use winit::application::ApplicationHandler;
@@ -83,6 +85,8 @@ struct HorseStackerApp {
     stacked_objects: Vec<StackedObject>,
     scene_graph: SceneGraph,
     camera_rig: CameraRig,
+    visuals: StackObjectVisuals,
+    sway_clock: f32,
 }
 
 impl HorseStackerApp {
@@ -92,6 +96,10 @@ impl HorseStackerApp {
     ) -> Result<Self, String> {
         let mut scene_graph = create_scene_graph();
         let farm = load_gltf_scene(asset_path("models/farm"))?;
+        let horse = load_gltf_scene(asset_path("models/horse"))?;
+        let farm_prop_templates = extract_farm_prop_templates(&farm)?;
+        let mut visuals = create_stack_object_visuals();
+        visuals.set_templates(farm_prop_templates, horse);
         mount_farm(&farm, &scene_graph.root);
         let mut camera_rig = create_camera_rig();
         camera_rig.update(&mut scene_graph.camera, 1.0, 0.0, 0);
@@ -112,6 +120,8 @@ impl HorseStackerApp {
             stacked_objects: Vec::new(),
             scene_graph,
             camera_rig,
+            visuals,
+            sway_clock: 0.0,
         })
     }
 
@@ -132,12 +142,19 @@ impl HorseStackerApp {
             self.physics_accumulator = 0.0;
             self.last_update_ms = now;
             self.camera_rig.reset_height();
+            self.sway_clock = 0.0;
+            remove_node_children(&self.scene_graph.stack_layer, None, None);
+            self.visuals.clear_pieces();
+            for node in self.visuals.instanced_nodes() {
+                add_node_child(&self.scene_graph.stack_layer, node);
+            }
         }
     }
 
     fn place(&mut self) {
         let now = self.now_ms();
-        if let PlacementOutcome::Placed(kind) = self.game.place(now, now) {
+        if let PlacementOutcome::Placed(selection) = self.game.place(now, now) {
+            let kind = selection.kind;
             let bodies = self.stack_bodies();
             let stack_top = get_supported_stack_height(&self.physics_world, &bodies, None);
             let landing_surface = if stack_top > 0.0 {
@@ -147,8 +164,18 @@ impl HorseStackerApp {
             };
             let y = landing_surface + get_stack_object_vertical_extent(kind, 0.0) + 0.08;
             let body = add_stack_object_body(&mut self.physics_world, kind, 0.0, y, 0.0);
-            self.stacked_objects.push(StackedObject::new(body, kind));
-            println!("Placed {}", get_stack_object_profile(kind).label);
+            let mut handle = self
+                .visuals
+                .add_piece(kind, selection.variant_index)
+                .expect("loaded models provide every stack-object batch");
+            self.visuals
+                .set_piece_transform(&mut handle, kind, 0.0, y as f32, 0.0);
+            self.stacked_objects
+                .push(StackedObject::new(body, kind, handle));
+            println!(
+                "Placed {}",
+                self.visuals.label(kind, selection.variant_index)
+            );
         }
     }
 
@@ -165,7 +192,9 @@ impl HorseStackerApp {
                 self.physics_accumulator -= PHYSICS_STEP;
                 steps += 1;
             }
+            self.sway_clock += delta_time as f32 * 1.6;
             self.synchronize_stack_objects(now, delta_time);
+            self.visuals.flush();
         }
         let bodies = self.stack_bodies();
         let current_height = get_supported_stack_height(&self.physics_world, &bodies, None);
@@ -187,6 +216,7 @@ impl HorseStackerApp {
         self.stacked_objects.clear();
         self.physics_accumulator = 0.0;
         self.camera_rig.reset_height();
+        self.visuals.clear_pieces();
     }
 
     fn stack_bodies(&self) -> Vec<Ref<RigidBody2D>> {
@@ -204,13 +234,15 @@ impl HorseStackerApp {
             if object.lost {
                 continue;
             }
-            let (speed, angular_velocity, x, y) = {
+            let (speed, angular_velocity, x, y, angle, body_index) = {
                 let body = object.body.read().unwrap();
                 (
                     body.velocity_x.hypot(body.velocity_y),
                     body.angular_velocity,
                     body.x,
                     body.y,
+                    body.angle,
+                    body.index,
                 )
             };
             if f64::from(speed) < HORSE_REST_LINEAR
@@ -248,7 +280,19 @@ impl HorseStackerApp {
                     newly_dropped_horses += 1;
                 }
                 lost_bodies.push(object.body.clone());
+                continue;
             }
+
+            let carried = ((y - PASTURE_TOP_Y as f32) / 0.9).clamp(0.0, 1.0);
+            let sway = carried * carried;
+            let sway_phase = self.sway_clock + body_index as f32 * 0.7;
+            self.visuals.set_piece_transform(
+                &mut object.handle,
+                object.kind,
+                x + sway_phase.sin() * 0.0016 * sway,
+                y,
+                angle + (sway_phase * 0.77 + 1.3).sin() * 0.010 * sway,
+            );
         }
         for body in lost_bodies {
             remove_stack_object_body(&mut self.physics_world, &body);
@@ -553,10 +597,11 @@ fn set_camera_aspect(scene_graph: &mut SceneGraph, width: u32, height: u32) {
 #[derive(Default)]
 struct PieceSequence {
     cursor: usize,
+    chicken_cursor: usize,
 }
 
 impl PieceSequence {
-    fn next(&mut self) -> StackObjectKind {
+    fn next(&mut self) -> StackObjectSelection {
         const PIECES: [StackObjectKind; 20] = [
             StackObjectKind::Horse,
             StackObjectKind::Hay,
@@ -581,7 +626,17 @@ impl PieceSequence {
         ];
         let kind = PIECES[self.cursor % PIECES.len()];
         self.cursor += 1;
-        kind
+        let variant_index = if kind == StackObjectKind::Chickens {
+            let variant_index = self.chicken_cursor % 2;
+            self.chicken_cursor += 1;
+            variant_index
+        } else {
+            0
+        };
+        StackObjectSelection {
+            kind,
+            variant_index,
+        }
     }
 }
 

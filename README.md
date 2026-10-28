@@ -41,8 +41,9 @@ through a Flight scene graph, with the web version's sky, lights, shadows, camer
 setup. Its round core drives both modes, the timer and settling phases, queued-piece cadence,
 placement counts, and the different scoring rules. Its Flight physics world uses the web version's
 stack profiles, collider geometry, materials, stability assistance, contact tracking, and
-supported/settled-height rules. Stack-object scene visuals and input aiming are the next visible
-porting slice.
+supported/settled-height rules. It now extracts the farm's hay, cow, and hen meshes, loads the horse
+model, and renders placed bodies through the same per-part Flight instancing design as the web game.
+Input aiming and the landing preview are the next visible porting slice.
 
 The Rust modules deliberately mirror the TypeScript file and declaration names, translated to
 Rust's standard `snake_case`, so the two implementations can be read side-by-side as an API

@@ -4,14 +4,42 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
+use flight_sdk::node::contract::{
+    get_node_local_matrix4, get_node_transform3d, is_node_local_matrix4_detached,
+    set_node_local_matrix4, set_node_transform3d,
+};
 use flight_sdk::{
-    ArrayBufferViewKind, GltfExternalBuffer, GltfExternalBufferView, GltfImportOptions,
-    GltfJsonSource, GltfSource, Node3DFields, NodeRef, Record, Ref, Scene3D, add_node_child,
+    ArrayBufferViewKind, EulerOrder, GltfExternalBuffer, GltfExternalBufferView, GltfImportOptions,
+    GltfJsonSource, GltfSource, IndexBuffer, IndexBufferU16, IndexBufferU32, Mesh, MeshGeometry,
+    MeshSubset, Node3DFields, NodeRef, PrimitiveTopology, Record, Ref, Scene3D, add_node_child,
+    as_node3d_ref, clone_mesh, clone_mesh_geometry, compact_mesh_geometry_vertices,
     create_array_buffer_from_bytes, create_array_buffer_view, create_node3d,
-    create_scene3d_from_gltf, invalidate_node_local_transform, publish_node3d, set_record_value,
+    create_scene3d_from_gltf, create_transform3d, find_node_by_name,
+    invalidate_node_local_transform, publish_node3d, refresh_mesh_geometry_bounds,
+    set_mesh_geometry_subsets, set_quaternion_from_euler, set_record_value,
 };
 
-use crate::data::FARM_PROP_SCENE_SCALE;
+use crate::data::{
+    FARM_PROP_SCENE_SCALE, FARM_PROP_VARIANTS, FarmPropKind, FarmPropPartSpec,
+    FarmPropTriangleFilter, select_farm_prop_triangle_indices,
+};
+
+#[derive(Default)]
+pub struct FarmPropTemplates {
+    pub hay: Vec<NodeRef>,
+    pub cow: Vec<NodeRef>,
+    pub chickens: Vec<NodeRef>,
+}
+
+impl FarmPropTemplates {
+    pub fn get(&self, kind: FarmPropKind) -> &[NodeRef] {
+        match kind {
+            FarmPropKind::Hay => &self.hay,
+            FarmPropKind::Cow => &self.cow,
+            FarmPropKind::Chickens => &self.chickens,
+        }
+    }
+}
 
 /// Loads the same `scene.gltf` + `scene.bin` pair fetched by the web implementation.
 pub fn load_gltf_scene(base_path: impl AsRef<Path>) -> Result<Scene3D, String> {
@@ -73,11 +101,190 @@ pub fn mount_farm(model: &Scene3D, scene_root: &NodeRef) {
     add_node_child(scene_root, &wrapper_node);
 }
 
+pub fn extract_farm_prop_templates(farm: &Scene3D) -> Result<FarmPropTemplates, String> {
+    let mut result = FarmPropTemplates::default();
+    let farm_root: NodeRef = farm.root.clone();
+    for kind in [FarmPropKind::Hay, FarmPropKind::Cow, FarmPropKind::Chickens] {
+        let mut templates = Vec::new();
+        for (variant_index, spec) in FARM_PROP_VARIANTS.get(kind).iter().enumerate() {
+            let template = create_group(Some(&format!(
+                "{}-{variant_index}-template",
+                farm_prop_key(kind)
+            )));
+            let scale_root = create_group(None);
+            {
+                let scale = FARM_PROP_SCENE_SCALE * spec.scale_multiplier.unwrap_or(1.0);
+                let node3d = as_node3d_ref(&scale_root).expect("farm prop scale root is Node3D");
+                let mut scale_root = node3d.write().unwrap();
+                let transform = scale_root.node3d_fields_mut();
+                transform.scale.x = scale;
+                transform.scale.y = scale;
+                transform.scale.z = scale;
+            }
+            invalidate_node_local_transform(&scale_root);
+
+            let axis_root = create_group(None);
+            let mut farm_transform = create_transform3d();
+            get_node_transform3d(&mut farm_transform, &farm_root);
+            set_node_transform3d(&axis_root, &farm_transform);
+            if is_node_local_matrix4_detached(&farm_root) {
+                set_node_local_matrix4(&axis_root, &get_node_local_matrix4(&farm_root));
+            }
+
+            let centered_source = create_group(None);
+            {
+                let node3d =
+                    as_node3d_ref(&centered_source).expect("farm prop center root is Node3D");
+                let mut centered_source = node3d.write().unwrap();
+                let transform = centered_source.node3d_fields_mut();
+                transform.position.x = -spec.center_x;
+                transform.position.y = -spec.center_y;
+                transform.position.z = -spec.center_z;
+            }
+            invalidate_node_local_transform(&centered_source);
+            for part in spec.parts {
+                let source = find_node_by_name(&farm_root, part.node_name)
+                    .ok_or_else(|| format!("Farm prop mesh {} was not imported", part.node_name))?;
+                let cloned = clone_farm_prop_part(&source, part)?;
+                let cloned: NodeRef = cloned;
+                add_node_child(&centered_source, &cloned);
+            }
+
+            let orientation_root = create_group(None);
+            {
+                let node3d =
+                    as_node3d_ref(&orientation_root).expect("farm prop orientation root is Node3D");
+                let mut orientation_root = node3d.write().unwrap();
+                set_quaternion_from_euler(
+                    &mut orientation_root.node3d_fields_mut().rotation,
+                    0.0,
+                    0.0,
+                    spec.rotation_z.unwrap_or(0.0),
+                    EulerOrder::XYZ,
+                );
+            }
+            invalidate_node_local_transform(&orientation_root);
+            add_node_child(&orientation_root, &centered_source);
+            add_node_child(&axis_root, &orientation_root);
+            add_node_child(&scale_root, &axis_root);
+            add_node_child(&template, &scale_root);
+            templates.push(template);
+        }
+        match kind {
+            FarmPropKind::Hay => result.hay = templates,
+            FarmPropKind::Cow => result.cow = templates,
+            FarmPropKind::Chickens => result.chickens = templates,
+        }
+    }
+    Ok(result)
+}
+
+fn clone_farm_prop_part(source: &NodeRef, part: &FarmPropPartSpec) -> Result<Ref<Mesh>, String> {
+    let source = as_node3d_ref(source)
+        .ok_or_else(|| format!("Farm prop mesh {} is not a Node3D", part.node_name))?;
+    let source = source.read().unwrap();
+    let mesh = source
+        .as_mesh()
+        .ok_or_else(|| format!("Farm prop mesh {} was not imported", part.node_name))?;
+    let material_name = mesh
+        .materials
+        .read()
+        .unwrap()
+        .first()
+        .and_then(Option::as_ref)
+        .and_then(|material| material.read().unwrap().material_fields().name.clone());
+    if material_name.as_deref() != Some(part.material_name) {
+        return Err(format!(
+            "Farm prop mesh {} uses {}, expected {}",
+            part.node_name,
+            material_name.as_deref().unwrap_or("no material"),
+            part.material_name,
+        ));
+    }
+    let cloned = clone_mesh(mesh);
+    if let Some(filter) = part.filter {
+        let geometry =
+            filter_farm_prop_geometry(&mesh.geometry.read().unwrap(), filter, part.node_name)?;
+        cloned.write().unwrap().geometry = Arc::new(RwLock::new(geometry));
+    }
+    Ok(cloned)
+}
+
+fn filter_farm_prop_geometry(
+    source: &MeshGeometry,
+    filter: &FarmPropTriangleFilter,
+    node_name: &str,
+) -> Result<MeshGeometry, String> {
+    if source.topology != PrimitiveTopology::TriangleList
+        || matches!(&source.indices, IndexBuffer::None)
+    {
+        return Err(format!(
+            "Farm prop mesh {node_name} is not an indexed triangle list"
+        ));
+    }
+    let selected_indices = select_farm_prop_triangle_indices(source, filter);
+    if selected_indices.is_empty() {
+        return Err(format!(
+            "Farm prop mesh {node_name} produced no selected triangles"
+        ));
+    }
+
+    let mut filtered = clone_mesh_geometry(source);
+    filtered.indices = match &source.indices {
+        IndexBuffer::U16(_) => IndexBuffer::U16(IndexBufferU16 {
+            data: Arc::new(RwLock::new(
+                selected_indices
+                    .iter()
+                    .map(|index| *index as u16)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            )),
+        }),
+        IndexBuffer::U32(_) => IndexBuffer::U32(IndexBufferU32 {
+            data: Arc::new(RwLock::new(selected_indices.into_boxed_slice())),
+        }),
+        IndexBuffer::None => unreachable!(),
+    };
+    let index_count = match &filtered.indices {
+        IndexBuffer::U16(indices) => indices.data.read().unwrap().len(),
+        IndexBuffer::U32(indices) => indices.data.read().unwrap().len(),
+        IndexBuffer::None => 0,
+    };
+    set_mesh_geometry_subsets(
+        &mut filtered,
+        &[MeshSubset {
+            index_count: index_count as u32,
+            index_offset: 0,
+        }],
+    );
+    let mut compact = compact_mesh_geometry_vertices(&filtered);
+    refresh_mesh_geometry_bounds(&mut compact);
+    Ok(compact)
+}
+
+fn create_group(name: Option<&str>) -> NodeRef {
+    let mut group = create_node3d::<Node3DFields>(None);
+    group.name = name.map(str::to_owned);
+    publish_node3d(group)
+}
+
+const fn farm_prop_key(kind: FarmPropKind) -> &'static str {
+    match kind {
+        FarmPropKind::Hay => "hay",
+        FarmPropKind::Cow => "cow",
+        FarmPropKind::Chickens => "chickens",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{load_gltf_scene, mount_farm};
+    use super::{extract_farm_prop_templates, load_gltf_scene, mount_farm};
     use crate::assets::asset_path;
-    use flight_sdk::{Node3DFields, NodeRef, create_node3d, get_node_children, publish_node3d};
+    use crate::data::FARM_PROP_VARIANTS;
+    use flight_sdk::{
+        IndexBuffer, Node3DFields, NodeRef, as_node3d_ref, create_node3d, get_node_children,
+        publish_node3d,
+    };
 
     #[test]
     fn loads_and_mounts_the_shared_farm_gltf() {
@@ -93,5 +300,40 @@ mod tests {
         let mut mounted = Vec::new();
         get_node_children(&mut mounted, &root);
         assert_eq!(mounted.len(), 1);
+    }
+
+    #[test]
+    fn extracts_every_authored_farm_prop_variant() {
+        let farm = load_gltf_scene(asset_path("models/farm")).unwrap();
+        let templates = extract_farm_prop_templates(&farm).unwrap();
+        assert_eq!(templates.hay.len(), 1);
+        assert_eq!(templates.cow.len(), 1);
+        assert_eq!(templates.chickens.len(), 2);
+        for (templates, specs) in [
+            (&templates.hay, FARM_PROP_VARIANTS.hay),
+            (&templates.cow, FARM_PROP_VARIANTS.cow),
+            (&templates.chickens, FARM_PROP_VARIANTS.chickens),
+        ] {
+            for (template, spec) in templates.iter().zip(specs) {
+                assert_eq!(count_triangles(template), spec.expected_triangle_count);
+            }
+        }
+    }
+
+    fn count_triangles(node: &NodeRef) -> usize {
+        let own_triangles = as_node3d_ref(node)
+            .and_then(|node| {
+                let node = node.read().unwrap();
+                node.as_mesh()
+                    .map(|mesh| match &mesh.geometry.read().unwrap().indices {
+                        IndexBuffer::U16(indices) => indices.data.read().unwrap().len() / 3,
+                        IndexBuffer::U32(indices) => indices.data.read().unwrap().len() / 3,
+                        IndexBuffer::None => 0,
+                    })
+            })
+            .unwrap_or(0);
+        let mut children = Vec::new();
+        get_node_children(&mut children, node);
+        own_triangles + children.iter().map(count_triangles).sum::<usize>()
     }
 }

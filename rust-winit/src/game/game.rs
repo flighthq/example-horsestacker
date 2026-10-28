@@ -2,6 +2,8 @@
 
 use crate::physics::{FINAL_SETTLE_SECONDS, StackObjectKind, get_next_object_delay};
 #[cfg(feature = "flight-physics")]
+use crate::scene::StackVisualHandle;
+#[cfg(feature = "flight-physics")]
 use flight_sdk::{Ref, RigidBody2D};
 
 use super::{GAME_DURATION_MS, GameMode, GamePhase, START_INPUT_GUARD_MS};
@@ -16,6 +18,21 @@ pub struct ActiveStackObject {
     pub y: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StackObjectSelection {
+    pub kind: StackObjectKind,
+    pub variant_index: usize,
+}
+
+impl From<StackObjectKind> for StackObjectSelection {
+    fn from(kind: StackObjectKind) -> Self {
+        Self {
+            kind,
+            variant_index: 0,
+        }
+    }
+}
+
 /// A placed piece and its dropped-horse bookkeeping (`StackedObject` in TypeScript).
 #[cfg(feature = "flight-physics")]
 pub struct StackedObject {
@@ -27,11 +44,12 @@ pub struct StackedObject {
     pub has_settled: bool,
     pub touched_ground: bool,
     pub collided_at_ms: f64,
+    pub handle: StackVisualHandle,
 }
 
 #[cfg(feature = "flight-physics")]
 impl StackedObject {
-    pub fn new(body: Ref<RigidBody2D>, kind: StackObjectKind) -> Self {
+    pub fn new(body: Ref<RigidBody2D>, kind: StackObjectKind, handle: StackVisualHandle) -> Self {
         Self {
             body,
             kind,
@@ -41,6 +59,7 @@ impl StackedObject {
             has_settled: false,
             touched_ground: false,
             collided_at_ms: 0.0,
+            handle,
         }
     }
 }
@@ -59,7 +78,7 @@ pub enum PlacementOutcome {
     InputGuarded,
     NoActiveObject,
     RoundExpired,
-    Placed(StackObjectKind),
+    Placed(StackObjectSelection),
 }
 
 /// The renderer-independent counterpart of TypeScript's `Game` interface and `createGame` state.
@@ -71,7 +90,7 @@ pub struct Game {
     phase: GamePhase,
     mode: GameMode,
     active_object: Option<ActiveStackObject>,
-    next_kind: StackObjectKind,
+    queued: StackObjectSelection,
     objects_dropped: u32,
     horses_dropped: u32,
     placement_armed_at_ms: f64,
@@ -84,12 +103,12 @@ pub struct Game {
 }
 
 impl Game {
-    fn new(first_queued_kind: StackObjectKind) -> Self {
+    fn new(first_queued: StackObjectSelection) -> Self {
         Self {
             phase: GamePhase::Loading,
             mode: GameMode::Time,
             active_object: None,
-            next_kind: first_queued_kind,
+            queued: first_queued,
             objects_dropped: 0,
             horses_dropped: 0,
             placement_armed_at_ms: 0.0,
@@ -118,7 +137,11 @@ impl Game {
     }
 
     pub const fn next_kind(&self) -> StackObjectKind {
-        self.next_kind
+        self.queued.kind
+    }
+
+    pub const fn next_variant_index(&self) -> usize {
+        self.queued.variant_index
     }
 
     pub const fn objects_dropped(&self) -> u32 {
@@ -174,23 +197,25 @@ impl Game {
         &mut self,
         mode: GameMode,
         now_ms: f64,
-        first_kind: StackObjectKind,
-        following_kind: StackObjectKind,
+        first: impl Into<StackObjectSelection>,
+        following: impl Into<StackObjectSelection>,
     ) -> Option<StackObjectKind> {
         if self.phase == GamePhase::Loading {
             return None;
         }
 
+        let first = first.into();
+        let following = following.into();
         self.mode = mode;
         self.phase = GamePhase::Playing;
         self.active_object = Some(ActiveStackObject {
             angle: 0.0,
-            kind: first_kind,
-            variant_index: 0,
+            kind: first.kind,
+            variant_index: first.variant_index,
             x: 0.0,
             y: 0.0,
         });
-        self.next_kind = following_kind;
+        self.queued = following;
         self.objects_dropped = 0;
         self.horses_dropped = 0;
         self.placement_armed_at_ms = now_ms + START_INPUT_GUARD_MS;
@@ -236,7 +261,10 @@ impl Game {
 
         self.objects_dropped += 1;
         self.next_object_at_ms = now_ms + get_next_object_delay(self.objects_dropped);
-        PlacementOutcome::Placed(active.kind)
+        PlacementOutcome::Placed(StackObjectSelection {
+            kind: active.kind,
+            variant_index: active.variant_index,
+        })
     }
 
     pub fn record_horse_dropped(&mut self) {
@@ -246,12 +274,12 @@ impl Game {
     }
 
     /// Advances the state machine. `draw_following` is evaluated only when a queued object spawns.
-    pub fn update(
+    pub fn update<T: Into<StackObjectSelection>>(
         &mut self,
         now_ms: f64,
         current_height: f64,
         settled_height: f64,
-        draw_following: impl FnOnce() -> StackObjectKind,
+        draw_following: impl FnOnce() -> T,
     ) -> GameEvent {
         if self.is_running() {
             self.displayed_height = current_height.max(0.0);
@@ -271,16 +299,16 @@ impl Game {
             GamePhase::Playing
                 if self.active_object.is_none() && now_ms >= self.next_object_at_ms =>
             {
-                let spawned = self.next_kind;
+                let spawned = self.queued;
                 self.active_object = Some(ActiveStackObject {
                     angle: 0.0,
-                    kind: spawned,
-                    variant_index: 0,
+                    kind: spawned.kind,
+                    variant_index: spawned.variant_index,
                     x: 0.0,
                     y: 0.0,
                 });
-                self.next_kind = draw_following();
-                GameEvent::ObjectSpawned(spawned)
+                self.queued = draw_following().into();
+                GameEvent::ObjectSpawned(spawned.kind)
             }
             GamePhase::Settling if now_ms >= self.finish_at_ms => GameEvent::Finished {
                 height: self.finish(current_height),
@@ -308,13 +336,13 @@ impl Game {
 }
 
 /// Creates the game state, mirroring `createGame` while dependencies are still owned by the host.
-pub fn create_game(first_queued_kind: StackObjectKind) -> Game {
-    Game::new(first_queued_kind)
+pub fn create_game(first_queued: impl Into<StackObjectSelection>) -> Game {
+    Game::new(first_queued.into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Game, GameEvent, PlacementOutcome, create_game};
+    use super::{Game, GameEvent, PlacementOutcome, StackObjectSelection, create_game};
     use crate::game::{GAME_DURATION_MS, GameMode, GamePhase, START_INPUT_GUARD_MS};
     use crate::physics::StackObjectKind;
 
@@ -355,7 +383,7 @@ mod tests {
         );
         assert_eq!(
             round.place(500.0, 100.0 + START_INPUT_GUARD_MS),
-            PlacementOutcome::Placed(StackObjectKind::Horse)
+            PlacementOutcome::Placed(StackObjectSelection::from(StackObjectKind::Horse))
         );
         assert_eq!(round.objects_dropped(), 1);
     }
@@ -371,7 +399,7 @@ mod tests {
         );
         assert_eq!(
             round.place(START_INPUT_GUARD_MS, START_INPUT_GUARD_MS),
-            PlacementOutcome::Placed(StackObjectKind::Horse)
+            PlacementOutcome::Placed(StackObjectSelection::from(StackObjectKind::Horse))
         );
 
         assert_eq!(
@@ -382,6 +410,21 @@ mod tests {
         assert_eq!(round.next_kind(), StackObjectKind::Cow);
         assert_eq!(round.displayed_height(), 0.2);
         assert_eq!(round.peak_height(), 0.15);
+    }
+
+    #[test]
+    fn placement_preserves_the_authored_visual_variant() {
+        let mut round = ready_round(StackObjectKind::Horse);
+        let chicken = StackObjectSelection {
+            kind: StackObjectKind::Chickens,
+            variant_index: 1,
+        };
+        round.start_round(GameMode::Time, 0.0, chicken, StackObjectKind::Hay);
+
+        assert_eq!(
+            round.place(START_INPUT_GUARD_MS, START_INPUT_GUARD_MS),
+            PlacementOutcome::Placed(chicken)
+        );
     }
 
     #[test]

@@ -11,14 +11,16 @@ The current foundation:
 - imports and mounts the shared farm glTF, with the same scale and placement as the web game;
 - builds the same sky dome, camera, light rig, tight-fit shadow camera, and stack-following orbit
   controller, then renders and presents them through Flight GL;
+- extracts hay, cow, and both hen variants from the farm's named mesh/material layers, loads the
+  horse glTF, and batches placed copies with Flight instanced meshes;
 - resolves models and sounds from the repository's shared `../assets/` tree;
 - ports the round phase machine, both modes, queued-piece cadence and scoring rules;
 - ports the stack profiles and collider geometry from TypeScript; and
 - runs placed pieces through Flight's Rust 2D physics with the same materials, collision shapes,
   stack assistance, contacts, pasture bounds, and supported/settled-height rules as the web game.
 
-The window currently renders the real Flight farm scene while exercising the round and physics
-rules with a deterministic piece sequence. Stack-object visuals, prop extraction, aimed placement,
+The window renders the real Flight farm and every placed stack object while exercising the round
+and physics rules with a deterministic piece sequence. Aimed placement and its landing preview,
 audio, and UI remain to be ported. The Rust source intentionally follows the TypeScript source
 file-for-file and declaration-for-declaration where a counterpart exists. Names only change to
 Rust's conventional `snake_case`; enums, explicit ownership, and `HorseStackWorld` provide the
@@ -27,7 +29,7 @@ small amount of host-language adaptation needed by Flight's Rust API.
 | TypeScript web | Rust + winit |
 | --- | --- |
 | `src/main.ts` | `src/main.rs` |
-| `src/data/farmPropGeometry.ts` | `src/data/farm_prop_geometry.rs` (scale; prop specifications next) |
+| `src/data/farmPropGeometry.ts` | `src/data/farm_prop_geometry.rs` |
 | `src/game/game.ts` | `src/game/game.rs` |
 | `src/game/gameConfig.ts` | `src/game/game_config.rs` |
 | `src/game/gameMode.ts` | `src/game/game_mode.rs` |
@@ -42,6 +44,7 @@ small amount of host-language adaptation needed by Flight's Rust API.
 | `src/scene/modelLoader.ts` | `src/scene/model_loader.rs` |
 | `src/scene/sceneGraph.ts` | `src/scene/scene_graph.rs` |
 | `src/scene/sceneRenderer.ts` | `src/scene/scene_renderer.rs` |
+| `src/scene/stackObjectVisual.ts` | `src/scene/stack_object_visual.rs` |
 
 ## Run
 
@@ -55,8 +58,8 @@ cargo run --manifest-path rust-winit/Cargo.toml
 Press <kbd>Enter</kbd> to start Time Challenge or <kbd>S</kbd> to start Steady Hands. Press
 <kbd>Space</kbd> or left-click to place the current piece, <kbd>Backspace</kbd> to leave a round,
 and <kbd>Escape</kbd> to exit. The current and next piece, clock, placement count, and live stack
-height are shown in the window title. Placed objects participate in Flight physics but are not yet
-attached to scene visuals.
+height are shown in the window title. Until aimed placement lands, pieces enter above the current
+supported stack at the pasture's center.
 
 ## Check
 
